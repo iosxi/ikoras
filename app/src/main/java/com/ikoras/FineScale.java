@@ -1,0 +1,142 @@
+package com.ikoras;
+
+/**
+ * 細かい段階（15〜70）と、実際に端末へ出す「ハード段 + エフェクトの負ゲイン」の対応。
+ *
+ * 目標の音量を dB で決め、その目標以上でいちばん近いハード段を選び、
+ * 足りない分（必ず 0 以下）をエフェクトの負ゲインで埋める。
+ *
+ * 目標以上の段を選ぶことに意味がある。こうすると埋める量が
+ * その段のすぐ下との間隔以内に必ず収まるので、
+ * もしエフェクトが何かの理由で効かなくなっても、音は「ハード 1 段分」しか跳ねない。
+ * これは物理キーを 1 回押したときと同じ跳ね幅で、事故にならない。
+ *
+ * 例外は、下限を {@link #FLOOR_DB} までハードの最下段より下へ伸ばしている区間。
+ * ここだけはエフェクトが 1 段分より大きな減衰を担うが、効かなくなったときに
+ * 跳ねる先はハードの最下段＝端末本来のいちばん小さい音なので、やはり事故にならない。
+ */
+final class FineScale {
+
+    /**
+     * どの端末でもここまでは下げられるようにする下限（最大段より何 dB 下か）。
+     *
+     * ハードの最下段が最大より何 dB 下かは OEM 次第で揃っていない。実測で
+     * Xperia 1 VII は -66.8 dB、AQUOS R8 は -51 dB しかなく、同じ「消音の 1 つ上」でも
+     * AQUOS のほうがはっきり大きい音になる。負ゲインを掛けられる端末では、
+     * ハードの最下段より下をエフェクトで作って、ここまで届かせる。
+     *
+     * 自分のハードの最下段がこれより下にある端末（Xperia）は、そのまま自分の
+     * 最下段を使う。伸ばすだけで、浅くすることはない。
+     *
+     * ハードの最下段より下では、エフェクトが 1 段分より大きな減衰を担う
+     * （AQUOS なら最大 15 dB ほど）。エフェクトが死ねばその分だけ音が跳ねるが、
+     * 跳ねた先はハードの最下段＝端末本来のいちばん小さい音なので、事故にはならない。
+     */
+    static final float FLOOR_DB = -66f;
+
+    static final int MIN_STEPS = 15;
+    /** v13 までは 150 だったが、使ってみると 70 で足りた。 */
+    static final int MAX_STEPS = 70;
+    static final int DEFAULT_STEPS = 70;
+
+    /** 端末に実際に出す値。level 0 は消音（ハード段 0）。 */
+    static final class Target {
+        final int hwIndex;
+        /** エフェクトに入れる負ゲイン (dB, <= 0)。 */
+        final float gainDb;
+        /** 最大音量を 0 としたときの、この段の狙いの dB。 */
+        final float totalDb;
+
+        Target(int hwIndex, float gainDb, float totalDb) {
+            this.hwIndex = hwIndex;
+            this.gainDb = gainDb;
+            this.totalDb = totalDb;
+        }
+    }
+
+    static int clampSteps(int steps) {
+        if (steps < MIN_STEPS) return MIN_STEPS;
+        if (steps > MAX_STEPS) return MAX_STEPS;
+        return steps;
+    }
+
+    static int clampLevel(int level, int steps) {
+        if (level < 0) return 0;
+        if (level > steps) return steps;
+        return level;
+    }
+
+    /** level（0〜steps）を、端末に出す値へ。 */
+    static Target targetFor(VolumeCurve c, int steps, int level) {
+        steps = clampSteps(steps);
+        level = clampLevel(level, steps);
+        if (level <= 0) {
+            return new Target(0, 0f, Float.NEGATIVE_INFINITY);   // 消音
+        }
+
+        float targetDb = targetDbFor(c, steps, level);
+
+        // 目標以上でいちばん小さいハード段
+        int h = c.maxIndex;
+        for (int i = c.minAudibleIndex; i <= c.maxIndex; i++) {
+            if (c.relDb[i] >= targetDb - 1e-4f) {
+                h = i;
+                break;
+            }
+        }
+        // 下限をハードの最下段より下へ伸ばしているときは、ここが最下段のままになり、
+        // gain がハード 1 段分より大きくなる。エフェクトがその差を担う。
+        float gain = targetDb - c.relDb[h];
+        if (gain > 0f) gain = 0f;            // 念のため。増幅は決してしない。
+        return new Target(h, gain, targetDb);
+    }
+
+    /** level に対応する狙いの dB。level=1 が端末の下限、level=steps が最大。 */
+    static float targetDbFor(VolumeCurve c, int steps, int level) {
+        steps = clampSteps(steps);
+        level = clampLevel(level, steps);
+        if (level <= 0) return Float.NEGATIVE_INFINITY;
+        float floorDb = c.floorDb();
+        if (steps <= 1) return 0f;
+        float t = (float) (level - 1) / (float) (steps - 1);
+        return floorDb + (0f - floorDb) * t;
+    }
+
+    /**
+     * 別の段階数で保存された level を、同じ音量のまま今の段階数へ移す。
+     *
+     * 段階数の上限を下げた版へ更新したとき、100 段で 40 段目にいた人を
+     * そのまま 70 段の 40 段目にすると音が大きく跳ねる。それを防ぐ。
+     * 保存側の段階数は今の上限を超えていてよいので、ここでは丸めない。
+     */
+    static int rescaleLevel(int level, int fromSteps, int toSteps) {
+        toSteps = clampSteps(toSteps);
+        if (level <= 0) return 0;
+        if (fromSteps <= 1) return toSteps;
+        float t = (float) (level - 1) / (float) (fromSteps - 1);
+        return clampLevel(1 + Math.round(t * (toSteps - 1)), toSteps);
+    }
+
+    /**
+     * ハード段だけが外から変えられていたとき（他アプリ、システム、voom を切っていた間など）に、
+     * その音量にいちばん近い level を求めて話を合わせる。
+     */
+    static int levelForHwIndex(VolumeCurve c, int steps, int hwIndex) {
+        steps = clampSteps(steps);
+        if (hwIndex <= 0) return 0;
+        if (hwIndex > c.maxIndex) hwIndex = c.maxIndex;
+        if (hwIndex < c.minAudibleIndex) hwIndex = c.minAudibleIndex;
+        float floorDb = c.floorDb();
+        if (floorDb >= 0f) return steps;
+        float t = (c.relDb[hwIndex] - floorDb) / (0f - floorDb);
+        int level = 1 + Math.round(t * (steps - 1));
+        return clampLevel(level, steps);
+    }
+
+    /** 1 段あたり平均何 dB になるか。設定画面で細かさを示すのに使う。 */
+    static float dbPerStep(VolumeCurve c, int steps) {
+        steps = clampSteps(steps);
+        if (steps <= 1) return 0f;
+        return -c.floorDb() / (float) (steps - 1);
+    }
+}

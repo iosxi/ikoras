@@ -1,0 +1,811 @@
+package com.ikoras;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.media.audiofx.AudioEffect;
+import android.media.audiofx.DynamicsProcessing;
+import android.media.audiofx.Equalizer;
+import android.os.Build;
+import android.util.Log;
+
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * The whole equalizer: settings, and one effect per audio session a player has opened.
+ * The sound itself is processed by the platform effect engine inside audioserver;
+ * this process only holds the handle, so it does no audio work of its own.
+ */
+final class Eq {
+    static final String TAG = "ikoras";
+
+    /**
+     * Band centres in Hz: 31 Hz to 16 kHz in equal steps on a log scale, so the middle
+     * band (700 Hz) is the log-centre. Gains are stored in half-dB steps, -24..+24 (±12 dB).
+     */
+    static final int[] FREQ = {31, 88, 250, 700, 2000, 5600, 16000};
+    static final int N = FREQ.length;
+    static final int STEPS = 24;
+
+    /** Open sessions → the package that opened them. Kept even while the EQ is off. */
+    static final Map<Integer, String> sessions = new LinkedHashMap<>();
+    /** Open sessions → the effect attached to them. Empty while the EQ is off. */
+    static final Map<Integer, AudioEffect> effects = new LinkedHashMap<>();
+
+    /** Called whenever sessions or effects change, so a visible screen can refresh. */
+    static Runnable listener;
+
+    private Eq() {}
+
+    static SharedPreferences prefs(Context c) {
+        return c.getSharedPreferences("eq", Context.MODE_PRIVATE);
+    }
+
+    static boolean isOn(Context c) {
+        return prefs(c).getBoolean("on", true);
+    }
+
+    /** The whole-output session: every app's sound, mixed. */
+    static final int GLOBAL = 0;
+
+    /**
+     * Whole-output mode: one effect on session 0 instead of one per player session. For players
+     * that never announce their sessions (YT Music on AQUOS R8 does not); it then shapes every
+     * sound on the device, and needs the service running all the time.
+     */
+    static boolean isGlobal(Context c) {
+        return prefs(c).getBoolean("global", false);
+    }
+
+    // --- While a silent player plays: the whole output, for a while -------------------------
+
+    /**
+     * YouTube plays and its session cannot be known (no DUMP): the effect is on the whole
+     * output meanwhile, as in whole-output mode. Told by {@link PlayingListener}.
+     */
+    private static boolean autoGlobal;
+    /** Last word from {@link PlayingListener}, to decide again when a setting changes. */
+    private static boolean silentPlaying;
+    private static final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+    /**
+     * Back to per-player effects only after a pause this long: a skip or a buffering hiccup
+     * should not tear the effects down and rebuild them twice.
+     */
+    private static final long AUTO_OFF_MS = 5000;
+    private static Runnable autoOff;
+
+    /** Whether the effect is on the whole output now, by the setting or while YouTube plays. */
+    static boolean usesGlobal(Context c) {
+        return isGlobal(c) || autoGlobal;
+    }
+
+    static boolean isAutoGlobal() {
+        return autoGlobal;
+    }
+
+    /** DUMP finds YouTube's own session ({@link Watch}): then the whole output is not needed. */
+    private static boolean autoAllowed(Context c) {
+        // Android 10 and older suspend the whole output while things play: the players would
+        // lose their own effects for nothing.
+        return isOn(c) && !isGlobal(c) && Watch.isEnabled(c) && !Watch.canDump(c) && globalReliable();
+    }
+
+    /** Why the whole output could not be had while YouTube plays, or null. For the screen. */
+    private static String autoBlocked;
+
+    static String autoBlocked() {
+        return silentPlaying ? autoBlocked : null;
+    }
+
+    static void setSilentPlaying(Context c, boolean playing) {
+        silentPlaying = playing;
+        // Each new play of YouTube tries again: the other app may have let go meanwhile.
+        if (!playing) autoBlocked = null;
+        decideAuto(c);
+    }
+
+    /** Called also when a setting changes: ON/OFF, whole-output mode, the YouTube switch. */
+    static void decideAuto(Context c) {
+        Context app = c.getApplicationContext();
+        boolean want = silentPlaying && autoAllowed(app);
+        if (autoOff != null) main.removeCallbacks(autoOff);
+        autoOff = null;
+        if (!autoAllowed(app)) autoBlocked = null;
+        // Tried and refused for this play: do not tear the players' effects down again.
+        if (want && autoBlocked != null) return;
+        if (want == autoGlobal) return;
+        if (want) {
+            switchAuto(app, true);
+        } else if (!autoAllowed(app)) {
+            switchAuto(app, false);
+        } else {
+            autoOff = () -> {
+                autoOff = null;
+                if (autoGlobal && !silentPlaying) switchAuto(app, false);
+            };
+            main.postDelayed(autoOff, AUTO_OFF_MS);
+        }
+    }
+
+    private static void switchAuto(Context c, boolean on) {
+        if (on) {
+            // Taken already (Android 11+ has no stand-in): the players keep their own effects
+            // rather than losing them for nothing.
+            if (deviceHasDp() && Mix.dp() == null && dpTaken(GLOBAL)) {
+                autoBlocked = GLOBAL_TAKEN;
+                Diag.note(c, "YouTube の再生中だが、全体に付けられない（" + autoBlocked + "）。アプリごとのまま");
+                changed();
+                return;
+            }
+            // The players' own effects go first: a whole-output effect made while one of them
+            // is enabled is born suspended, and on the SH-M06 (Android 10) stayed so after they
+            // were released.
+            autoGlobal = true;
+            releaseAll();
+            if (attachMissing(c)) {
+                Diag.note(c, "YouTube の再生中: 全体に効かせる");
+            } else {
+                autoGlobal = false;
+                autoBlocked = errors.containsKey(GLOBAL) ? errors.get(GLOBAL) : "全体に付けられません";
+                Diag.note(c, "YouTube の再生中だが、全体に付けられない（" + autoBlocked + "）。アプリごとに戻す");
+                attachMissing(c);
+            }
+        } else {
+            autoGlobal = false;
+            Diag.note(c, "YouTube が止まった: アプリごとに戻す");
+            releaseAll();
+            attachMissing(c);
+        }
+        EqService.sync(c);
+        changed();
+    }
+
+    static void setGlobal(Context c, boolean global) {
+        prefs(c).edit().putBoolean("global", global).apply();
+        Diag.note(c, global ? "全体モードにした" : "再生ごとのモードにした");
+        autoGlobal = false;
+        releaseAll();
+        attachMissing(c);
+        if (!global) Watch.look(c);
+        decideAuto(c);
+        changed();
+    }
+
+    private static void releaseAll() {
+        for (Map.Entry<Integer, AudioEffect> e : effects.entrySet()) dispose(e.getKey(), e.getValue());
+        effects.clear();
+        control.clear();
+        errors.clear();
+        blocked.clear();
+    }
+
+    /**
+     * Keep the process (and its runtime receiver) alive all the time, as Wavelet does. For
+     * devices that do not start a dead process for a player's broadcast.
+     */
+    static boolean isResident(Context c) {
+        return prefs(c).getBoolean("resident", false);
+    }
+
+    static void setResident(Context c, boolean resident) {
+        prefs(c).edit().putBoolean("resident", resident).apply();
+        Diag.note(c, resident ? "常駐して待つ: ON" : "常駐して待つ: OFF");
+    }
+
+    /** Whether the service should be running at all. */
+    static boolean needsService(Context c) {
+        return !effects.isEmpty() || (isOn(c) && (isResident(c) || isGlobal(c))) || Watch.active(c);
+    }
+
+    // --- BASS: lift the low end without distortion ------------------------------------------
+
+    static final int BASS_MAX = 5;
+    /** Below this, the low band of the multiband compressor; above it passes untouched. */
+    private static final float BASS_CUTOFF = 150f;
+
+    static int bass(Context c) {
+        return prefs(c).getInt("bass", 0);
+    }
+
+    static void setBass(Context c, int level) {
+        prefs(c).edit().putInt("bass", level).apply();
+        Outputs.remember(c);
+        applyBassAll(c, level);
+    }
+
+    private static void applyBassAll(Context c, int level) {
+        for (Map.Entry<Integer, AudioEffect> e : effects.entrySet()) {
+            if (e.getValue() instanceof DynamicsProcessing) {
+                DynamicsProcessing dp = (DynamicsProcessing) e.getValue();
+                applyBass(dp, level);
+                Diag.note(c, "session " + e.getKey() + ": BASS " + level + " → " + readBack(dp));
+            } else {
+                apply(e.getValue(), gainsDb(c), level);
+                Diag.note(c, "session " + e.getKey() + ": BASS " + level + "（端末標準のイコライザで近似）");
+            }
+        }
+    }
+
+    /** What the engine reports back, to tell "set" from "in effect" (the CPU cost is too small to show it). */
+    private static String readBack(DynamicsProcessing dp) {
+        try {
+            DynamicsProcessing.MbcBand low = dp.getMbcBandByChannelIndex(0, 0);
+            return "圧縮 " + (dp.getMbcByChannelIndex(0).isEnabled() ? "有効" : "無効")
+                    + String.format(java.util.Locale.ROOT, "・低域 %+.0f dB（%.0f Hz 以下, %.0f:1, %.0f dB から）",
+                    low.getPostGain(), low.getCutoffFrequency(), low.getRatio(), low.getThreshold())
+                    + "・リミッター " + (dp.getLimiterByChannelIndex(0).isEnabled() ? "有効" : "無効");
+        } catch (RuntimeException e) {
+            return "読み戻せない: " + e.getMessage();
+        }
+    }
+
+    /**
+     * The low band is raised by its post-gain (+2 dB a step), and compressed above -12 dBFS at
+     * 4:1: quiet bass comes up by the full amount, loud bass swells much less, so the lift does
+     * not turn into overload. A limiter at -1 dBFS catches what is left. Level 0 disables both
+     * stages, so an unused BASS costs nothing.
+     */
+    static DynamicsProcessing.MbcBand lowBand(int level) {
+        // The engine keeps the compressor stage enabled even when told to disable it (read back
+        // on the Xperia): at level 0 make the band itself neutral, so OFF really leaves bass alone.
+        if (level <= 0) return passBand(BASS_CUTOFF);
+        return new DynamicsProcessing.MbcBand(true, BASS_CUTOFF,
+                5f, 120f,          // attack, release (ms)
+                4f, -12f, 6f,      // ratio, threshold (dB), knee width (dB)
+                -90f, 1f,          // noise gate threshold, expander ratio: off
+                0f, 2f * level);   // pre-gain, post-gain (dB)
+    }
+
+    /** No compression (1:1), no gain: the band passes unchanged. */
+    static DynamicsProcessing.MbcBand passBand(float cutoff) {
+        return new DynamicsProcessing.MbcBand(true, cutoff, 5f, 120f, 1f, 0f, 0f, -90f, 1f, 0f, 0f);
+    }
+
+    static DynamicsProcessing.Limiter limiter(int level) {
+        // inUse, enabled, link group, attack, release (ms), ratio, threshold, post-gain (dB)
+        return new DynamicsProcessing.Limiter(true, level > 0, 0, 1f, 60f, 10f, -1f, 0f);
+    }
+
+    static void applyBass(DynamicsProcessing dp, int level) {
+        try {
+            dp.setMbcAllChannelsTo(new DynamicsProcessing.Mbc(true, level > 0, 2));
+            dp.setMbcBandAllChannelsTo(0, lowBand(level));
+            dp.setMbcBandAllChannelsTo(1, passBand(20000f));
+            dp.setLimiterAllChannelsTo(limiter(level));
+        } catch (RuntimeException e) {
+            // Lost control: another app's settings apply, not ours.
+            Log.w(TAG, "BASS not applied: " + e.getMessage());
+        }
+    }
+
+    /**
+     * For the Equalizer fallback, which has no compressor: the same lift as a plain low shelf
+     * (full below 60 Hz, fading out by 150 Hz). Louder bass can clip there; say so on screen.
+     */
+    private static float shelf(float hz, int level) {
+        if (level <= 0 || hz >= BASS_CUTOFF) return 0f;
+        float full = 2f * level;
+        if (hz <= 60f) return full;
+        return (float) (full * (Math.log(BASS_CUTOFF / hz) / Math.log(BASS_CUTOFF / 60f)));
+    }
+
+    /** Keys are "g0".. so the 10-band values of v1–v2 ("b0"..) are not misread. */
+    static int step(Context c, int band) {
+        return prefs(c).getInt("g" + band, 0);
+    }
+
+    static float[] gainsDb(Context c) {
+        float[] g = new float[N];
+        for (int i = 0; i < N; i++) g[i] = step(c, i) / 2f;
+        return g;
+    }
+
+    static void open(Context c, int session, String pkg) {
+        if (pkg == null) pkg = "";
+        // A player that is killed never closes its session; its next one replaces it.
+        if (!pkg.isEmpty()) {
+            for (Integer old : sessions.keySet().toArray(new Integer[0])) {
+                if (old != session && pkg.equals(sessions.get(old))) close(c, old);
+            }
+        }
+        sessions.put(session, pkg);
+        save(c);
+        attachMissing(c);
+        changed();
+    }
+
+    /**
+     * Sessions are kept across process restarts. A player announces a session once, when it
+     * starts playing; if ikora's process is replaced mid-song (an update, a force stop, the
+     * system reclaiming memory), the effect dies with it and no second announcement comes.
+     */
+    private static void save(Context c) {
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<Integer, String> e : sessions.entrySet()) {
+            if (sb.length() > 0) sb.append(';');
+            sb.append(e.getKey()).append(':').append(e.getValue());
+        }
+        prefs(c).edit().putString("sessions", sb.toString()).apply();
+    }
+
+    /**
+     * Called once per process start: re-attach to the sessions saved by the previous process.
+     * Also while nothing plays: an update is usually installed with the music paused, and a
+     * paused player resumes the same session without announcing it again (seen on the Xperia),
+     * so dropping it here meant force-stopping the player after every update. A session that
+     * did end meanwhile is harmless to attach to, and is replaced by the player's next one.
+     */
+    static void restore(Context c) {
+        String saved = prefs(c).getString("sessions", "");
+        if (saved.isEmpty()) return;
+        for (String item : saved.split(";")) {
+            int colon = item.indexOf(':');
+            if (colon <= 0) continue;
+            String pkg = item.substring(colon + 1);
+            // Found through DUMP (Watch). Without it that session can be neither followed nor
+            // replaced, and showed as "✓ YouTube" next to "YouTube is not reached".
+            if (Watch.isSilent(pkg) && !Watch.canDump(c)) continue;
+            try {
+                sessions.put(Integer.parseInt(item.substring(0, colon)), pkg);
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        Diag.note(c, "前のプロセスのセッションを復元: " + sessions.keySet());
+        attachMissing(c);
+        changed();
+    }
+
+    static void close(Context c, int session) {
+        sessions.remove(session);
+        save(c);
+        if (session == GLOBAL) return;
+        errors.remove(session);
+        AudioEffect fx = effects.remove(session);
+        if (fx != null) dispose(session, fx);
+        control.remove(session);
+        changed();
+    }
+
+    static void setOn(Context c, boolean on) {
+        prefs(c).edit().putBoolean("on", on).apply();
+        if (on) {
+            attachMissing(c);
+            Watch.look(c);
+        } else {
+            releaseAll();
+        }
+        decideAuto(c);
+        changed();
+    }
+
+    /**
+     * Attach to every open session that has no effect yet. An attach fails while another
+     * app's DynamicsProcessing holds the session, so this is retried while the screen is open.
+     * Returns whether anything new got attached.
+     */
+    static boolean attachMissing(Context c) {
+        if (!isOn(c)) return false;
+        if (usesGlobal(c)) {
+            // Per-session effects would shape those players twice.
+            if (effects.containsKey(GLOBAL)) return false;
+            AudioEffect fx = createGlobal(c);
+            if (fx == null) return false;
+            effects.put(GLOBAL, fx);
+            return true;
+        }
+        boolean any = false;
+        float[] g = null;
+        for (int s : sessions.keySet()) {
+            if (effects.containsKey(s)) continue;
+            if (g == null) g = gainsDb(c);
+            AudioEffect fx = create(c, s, g);
+            if (fx != null) {
+                effects.put(s, fx);
+                any = true;
+            }
+        }
+        return any;
+    }
+
+    /** Whether something that should have ikora's effect has none (another app holds it). */
+    static boolean missing(Context c) {
+        if (!isOn(c)) return false;
+        if (usesGlobal(c)) return !effects.containsKey(GLOBAL);
+        for (int s : sessions.keySet()) {
+            if (!effects.containsKey(s)) return true;
+        }
+        return false;
+    }
+
+    static void setSteps(Context c, int[] steps) {
+        SharedPreferences.Editor e = prefs(c).edit();
+        for (int i = 0; i < N; i++) e.putInt("g" + i, steps[i]);
+        e.apply();
+        Outputs.remember(c);
+        applyAll(c);
+    }
+
+    static void setStep(Context c, int band, int step) {
+        prefs(c).edit().putInt("g" + band, step).apply();
+        Outputs.remember(c);
+        applyAll(c);
+    }
+
+    /** Bands and BASS at once, as saved for an output: the output changed. */
+    static void setAll(Context c, int[] steps, int bassLevel) {
+        SharedPreferences.Editor e = prefs(c).edit();
+        for (int i = 0; i < N; i++) e.putInt("g" + i, steps[i]);
+        e.putInt("bass", bassLevel).apply();
+        applyAll(c);
+        applyBassAll(c, bassLevel);
+        changed();
+    }
+
+    private static void applyAll(Context c) {
+        float[] g = gainsDb(c);
+        int b = bass(c);
+        for (AudioEffect fx : effects.values()) apply(fx, g, b);
+    }
+
+    /**
+     * Control per session, as last reported to us. Kept ourselves: on the Xperia, hasControl()
+     * still said true after the listener had reported the loss (volzz took session 0 over).
+     */
+    private static final Map<Integer, Boolean> control = new LinkedHashMap<>();
+
+    /** Whether ikora's effect on this session is attached and actually in control. */
+    static boolean working(int session) {
+        return effects.containsKey(session) && Boolean.TRUE.equals(control.get(session));
+    }
+
+    /** Type of ikora's effect on the session, or null. */
+    static java.util.UUID typeOn(int session) {
+        AudioEffect fx = effects.get(session);
+        return fx == null ? null : fx.getDescriptor().type;
+    }
+
+    /** How ikora's effect on the session works, for the screen. */
+    static String engineOn(int session) {
+        AudioEffect fx = effects.get(session);
+        if (fx instanceof Equalizer) {
+            try {
+                return "端末標準のイコライザ・" + ((Equalizer) fx).getNumberOfBands() + " バンドで近似";
+            } catch (RuntimeException e) {
+                return "端末標準のイコライザで近似";
+            }
+        }
+        return fx == null ? "" : "7 バンド";
+    }
+
+    private static void changed() {
+        if (listener != null) listener.run();
+    }
+
+    // --- Effect engines -----------------------------------------------------------------
+
+    /** Upper edge of each band: halfway (geometrically) to the next centre. */
+    static float cutoff(int i) {
+        return i == N - 1 ? 20000f : (float) Math.sqrt((double) FREQ[i] * FREQ[i + 1]);
+    }
+
+    private static Boolean hasDp;
+
+    static void collectOrphans() {
+        System.gc();
+        System.runFinalization();
+    }
+    private static final Set<Integer> blocked = new HashSet<>();
+
+    /** Whether this device has DynamicsProcessing at all (every Android 9+ build should). */
+    static boolean deviceHasDp() {
+        if (hasDp == null) {
+            hasDp = false;
+            for (AudioEffect.Descriptor d : AudioEffect.queryEffects()) {
+                if (AudioEffect.EFFECT_TYPE_DYNAMICS_PROCESSING.equals(d.type)) hasDp = true;
+            }
+        }
+        return hasDp;
+    }
+
+    /** Why the last attach to each session failed, for the screen and the report. */
+    static final Map<Integer, String> errors = new LinkedHashMap<>();
+
+    /**
+     * Release an effect. A DynamicsProcessing engine is shared by every app on the session and
+     * keeps the last settings it was given: flatten ours first, so no curve of ikora's stays
+     * on in someone else's engine (on session 0 that was volzz's).
+     */
+    private static void dispose(int session, AudioEffect fx) {
+        if (session == GLOBAL && fx == Mix.dp()) {
+            // Shared with the fine volume: only our part goes (flat EQ, BASS off).
+            Mix.release(false);
+            return;
+        }
+        if (fx instanceof DynamicsProcessing && Boolean.TRUE.equals(control.get(session))) {
+            try {
+                for (int i = 0; i < N; i++) {
+                    ((DynamicsProcessing) fx).setPreEqBandAllChannelsTo(i, new DynamicsProcessing.EqBand(true, cutoff(i), 0f));
+                }
+                applyBass((DynamicsProcessing) fx, 0);
+            } catch (RuntimeException ignored) {
+                // Lost control meanwhile: nothing of ours is being applied then.
+            }
+        }
+        // Disabled before released, as volzz does: an enabled per-player effect is what makes
+        // Android suspend the whole-output ones, and it should say it is gone.
+        try {
+            fx.setEnabled(false);
+        } catch (RuntimeException ignored) {
+            // Not ours to disable (no control): releasing is enough.
+        }
+        fx.release();
+    }
+
+    /**
+     * Whether another app already has a DynamicsProcessing on the session. Found by trying one
+     * at the lowest priority: without control its config cannot be set, so it throws.
+     */
+    static boolean dpTaken(int session) {
+        // A plain AudioEffect handle at the lowest priority: it gets control only if nobody else
+        // holds the engine, and can always be released. The DynamicsProcessing constructor
+        // used before throws when it lacks control, and the handle it had made stayed attached
+        // (seen on session 0 of the XQ-FS44 a minute later, gc notwithstanding), keeping the
+        // other app's engine alive after that app let go.
+        try {
+            AudioEffect probe = (AudioEffect) AudioEffect.class
+                    .getConstructor(java.util.UUID.class, java.util.UUID.class, int.class, int.class)
+                    .newInstance(AudioEffect.EFFECT_TYPE_DYNAMICS_PROCESSING,
+                            // AudioEffect.EFFECT_TYPE_NULL (hidden): any implementation of the type
+                            java.util.UUID.fromString("ec7178ec-e5e1-4432-a3f4-4657e6795210"),
+                            Integer.MIN_VALUE, session);
+            boolean taken = !probe.hasControl();
+            probe.release();
+            return taken;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            Log.w(TAG, "plain handle unavailable: " + e);
+        }
+        try {
+            new DynamicsProcessing(Integer.MIN_VALUE, session, null).release();
+            return false;
+        } catch (RuntimeException e) {
+            collectOrphans();
+            return true;
+        }
+    }
+
+    /**
+     * Android suspends whole-output effects while players have effects of their own, and from
+     * Android 11 exempts DynamicsProcessing only (AOSP EffectChain::isEffectEligibleForSuspend).
+     * The app is not told: getEnabled() stays true. Measured with a whole-output Equalizer:
+     * suspended on the XQ-FS44 (Android 16) and the AQUOS SH-M06 (Android 10), and a tester's
+     * AQUOS R8 (Android 16) heard no change. So the whole output takes a DynamicsProcessing or
+     * nothing: v1–v19 fell back to the Equalizer there, which only looked like it worked.
+     */
+    static final String GLOBAL_TAKEN = "ほかのアプリ（音量調整アプリなど）が全体の DynamicsProcessing を使っています";
+
+    /**
+     * Whether the whole output can be relied on at all: on Android 10 and older even a
+     * DynamicsProcessing there is suspended (the SH-M06 suspended volzz's while YouTube played,
+     * with only the system's volume listener on it). YouTube via the whole output needs 11.
+     */
+    static boolean globalReliable() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.R;
+    }
+
+    private static AudioEffect createGlobal(Context c) {
+        return create(c, GLOBAL, gainsDb(c));
+    }
+
+    /**
+     * The whole output: the engine {@link Mix} shares with the fine volume, our curve and BASS
+     * on its pre-EQ and compressor. Another app's engine there is not joined: joining takes it
+     * over (the newest handle of equal priority gets control, measured on the SH-M06) and
+     * resets its settings, a volume tool's included: the sound would jump.
+     */
+    private static AudioEffect createGlobalMix(Context c, float[] g) {
+        DynamicsProcessing dp = Mix.acquire(c, false);
+        if (dp == null) {
+            Mix.release(false);
+            errors.put(GLOBAL, Mix.error == null ? GLOBAL_TAKEN : Mix.error);
+            if (blocked.add(GLOBAL)) Diag.note(c, "全体: " + errors.get(GLOBAL) + "。付けない");
+            return null;
+        }
+        apply(dp, g, bass(c));
+        applyBass(dp, bass(c));
+        control.put(GLOBAL, dp.hasControl());
+        errors.remove(GLOBAL);
+        Diag.note(c, "session 0: 全体の DynamicsProcessing にイコライザを載せた（制御権 "
+                + (dp.hasControl() ? "あり" : "なし") + "）");
+        return dp;
+    }
+
+    /** {@link Mix} lost the whole output to another app. */
+    static void globalLost(Context app) {
+        if (effects.remove(GLOBAL) == null) return;
+        control.remove(GLOBAL);
+        if (autoGlobal) {
+            // Only there for YouTube: give the players their own effects back.
+            autoGlobal = false;
+            autoBlocked = GLOBAL_TAKEN;
+            Diag.note(app, "YouTube の再生中だが、全体を取られた。アプリごとに戻す");
+        }
+        attachMissing(app);
+        EqService.sync(app);
+        changed();
+    }
+
+    /** {@link Mix} got the whole output back: our values are set again. */
+    static void globalRegained(Context app, DynamicsProcessing dp) {
+        if (effects.get(GLOBAL) != dp) return;
+        control.put(GLOBAL, true);
+        apply(dp, gainsDb(app), bass(app));
+        applyBass(dp, bass(app));
+        changed();
+    }
+
+    private static AudioEffect create(Context c, int session, float[] g) {
+        if (session == GLOBAL && deviceHasDp()) return createGlobalMix(c, g);
+        if (deviceHasDp()) {
+            // The same bands on every device. If another app's DynamicsProcessing already
+            // holds this session with a higher priority, setting our config fails: report
+            // that instead of stacking a second equalizer on top.
+            try {
+                // Stages in use: the 7-band EQ, a 2-band compressor and a limiter for BASS.
+                // Which stages exist is fixed at creation; BASS only enables or disables them.
+                DynamicsProcessing.Config cfg = new DynamicsProcessing.Config.Builder(
+                        DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION, 2,
+                        true, N, true, 2, false, 0, true).build();
+                cfg.setPreEqAllChannelsTo(new DynamicsProcessing.Eq(true, true, N));
+                for (int i = 0; i < N; i++) {
+                    cfg.setPreEqBandAllChannelsTo(i, new DynamicsProcessing.EqBand(true, cutoff(i), g[i]));
+                }
+                int level = bass(c);
+                cfg.setMbcAllChannelsTo(new DynamicsProcessing.Mbc(true, level > 0, 2));
+                cfg.setMbcBandAllChannelsTo(0, lowBand(level));
+                cfg.setMbcBandAllChannelsTo(1, passBand(20000f));
+                cfg.setLimiterAllChannelsTo(limiter(level));
+                DynamicsProcessing dp = new DynamicsProcessing(0, session, cfg);
+                dp.setEnabled(true);
+                control.put(session, dp.hasControl());
+                watchControl(c, session, dp);
+                errors.remove(session);
+                Diag.note(c, "session " + session + ": DynamicsProcessing を付けた（制御権 "
+                        + (dp.hasControl() ? "あり" : "なし") + "）");
+                return dp;
+            } catch (RuntimeException e) {
+                errors.put(session, String.valueOf(e.getMessage()));
+                // The constructor failed after audioserver had made our handle: let the
+                // finalizer release it now rather than leave it attached until some later GC.
+                collectOrphans();
+                // Retried every few seconds while the screen is open: say it once.
+                if (blocked.add(session)) {
+                    Diag.note(c, "session " + session + ": DynamicsProcessing を付けられない: " + e);
+                }
+                // A DynamicsProcessing we cannot control means another app shapes the session:
+                // stacking a second equalizer is wrong, and on the whole output an Equalizer
+                // would be suspended anyway (see GLOBAL_TAKEN).
+                return null;
+            }
+        }
+        // Only a device with no DynamicsProcessing at all gets here.
+        return createEqualizer(c, session, g);
+    }
+
+    /** The device's own Equalizer, fed with our curve. */
+    private static AudioEffect createEqualizer(Context c, int session, float[] g) {
+        try {
+            Equalizer eq = new Equalizer(0, session);
+            apply(eq, g, bass(c));
+            eq.setEnabled(true);
+            control.put(session, eq.hasControl());
+            watchControl(c, session, eq);
+            errors.remove(session);
+            Diag.note(c, "session " + session + ": Equalizer を付けた（" + eq.getNumberOfBands()
+                    + " バンドで近似・制御権 " + (eq.hasControl() ? "あり" : "なし") + "）");
+            return eq;
+        } catch (RuntimeException e) {
+            errors.put(session, String.valueOf(e.getMessage()));
+            if (blocked.add(session)) Diag.note(c, "session " + session + ": Equalizer を付けられない: " + e);
+            return null;
+        }
+    }
+
+    /**
+     * Another app attaching the same kind of effect later with a higher priority takes the
+     * shared engine over (Poweramp Equalizer uses 1337); ours stays attached but its settings
+     * no longer apply. Record both directions, and re-apply our curve on getting it back.
+     */
+    private static void watchControl(Context c, int session, AudioEffect fx) {
+        Context app = c.getApplicationContext();
+        fx.setControlStatusListener((effect, granted) -> {
+            Diag.note(app, "session " + session + ": 制御権を" + (granted ? "取り戻した" : "失った（ほかのアプリが優先）"));
+            control.put(session, granted);
+            if (granted) {
+                apply(effect, gainsDb(app), bass(app));
+                if (effect instanceof DynamicsProcessing) applyBass((DynamicsProcessing) effect, bass(app));
+            }
+            // The whole output is watched by Mix, which shares it with the fine volume.
+            changed();
+        });
+    }
+
+    private static void apply(AudioEffect fx, float[] g, int bassLevel) {
+        try {
+            if (fx instanceof DynamicsProcessing) {
+                DynamicsProcessing dp = (DynamicsProcessing) fx;
+                for (int i = 0; i < N; i++) {
+                    dp.setPreEqBandAllChannelsTo(i, new DynamicsProcessing.EqBand(true, cutoff(i), g[i]));
+                }
+            } else if (fx instanceof Equalizer) {
+                Equalizer eq = (Equalizer) fx;
+                short[] range = eq.getBandLevelRange();
+                for (short b = 0; b < eq.getNumberOfBands(); b++) {
+                    float hz = eq.getCenterFreq(b) / 1000f;
+                    int mb = Math.round((curveAt(g, hz) + shelf(hz, bassLevel)) * 100);
+                    eq.setBandLevel(b, (short) Math.max(range[0], Math.min(range[1], mb)));
+                }
+            }
+        } catch (RuntimeException e) {
+            // Another app's effect has taken control of this session. Kept for the report:
+            // only logged before, so "changes do not take" could not be told from "not heard".
+            Log.w(TAG, "apply failed: " + e.getMessage());
+            applyError = new java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.ROOT)
+                    .format(new java.util.Date()) + " " + fx.getClass().getSimpleName() + ": " + e;
+        }
+    }
+
+    /** The last failure to set our values on an effect, or null. */
+    static String applyError;
+
+    /**
+     * What the engine holds now for each of ikora's effects, read back: whether a change
+     * reached the effect at all. For the report.
+     */
+    static String readBackAll() {
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<Integer, AudioEffect> e : effects.entrySet()) {
+            AudioEffect fx = e.getValue();
+            sb.append("- session ").append(e.getKey()).append(": ");
+            try {
+                sb.append(fx.getEnabled() ? "有効" : "無効").append("・制御権 ")
+                        .append(fx.hasControl() ? "あり" : "なし").append("・");
+                if (fx instanceof DynamicsProcessing) {
+                    DynamicsProcessing dp = (DynamicsProcessing) fx;
+                    for (int i = 0; i < N; i++) {
+                        sb.append(i == 0 ? "" : " / ").append(FREQ[i]).append(String.format(
+                                java.util.Locale.ROOT, " %+.1f", dp.getPreEqBandByChannelIndex(0, i).getGain()));
+                    }
+                } else if (fx instanceof Equalizer) {
+                    Equalizer eq = (Equalizer) fx;
+                    for (short b = 0; b < eq.getNumberOfBands(); b++) {
+                        sb.append(b == 0 ? "" : " / ").append(eq.getCenterFreq(b) / 1000).append(String.format(
+                                java.util.Locale.ROOT, " %+.1f", eq.getBandLevel(b) / 100f));
+                    }
+                }
+            } catch (RuntimeException x) {
+                sb.append("読み戻せない: ").append(x);
+            }
+            sb.append('\n');
+        }
+        // The whole output's engine is shared with the fine volume: say what it holds for that.
+        if (Mix.dp() != null) {
+            sb.append(String.format(java.util.Locale.ROOT, "- 全体の入力ゲイン（細かい音量）: %+.1f dB%s\n",
+                    Mix.readGain(), Mix.usedForEq() ? "" : "（イコライザは載せていない）"));
+        }
+        return sb.length() == 0 ? "（付いていない）\n" : sb.toString();
+    }
+
+    /** Our curve at an arbitrary frequency, interpolated on a log-frequency axis. */
+    private static float curveAt(float[] g, float hz) {
+        if (hz <= FREQ[0]) return g[0];
+        for (int i = 1; i < N; i++) {
+            if (hz <= FREQ[i]) {
+                double t = Math.log(hz / FREQ[i - 1]) / Math.log((double) FREQ[i] / FREQ[i - 1]);
+                return (float) (g[i - 1] + (g[i] - g[i - 1]) * t);
+            }
+        }
+        return g[N - 1];
+    }
+}

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ikora の青緑と volzz の紺。アイコンで左右に分けて使う。 -->
+    <color name="ic_teal">#00897B</color>
+    <color name="ic_navy">#1F2A44</color>
+</resources>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  左に volzz の上下の矢印（音量キー）、右に ikora の 3 本のフェーダー（イコライザ）。
+  108dp 四方、安全域（中央の半径 33dp の円）に収めてある。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- 音量キー: 上向き・下向きの矢印 -->
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M36,30L45,41L40,41L40,50L32,50L32,41L27,41Z" />
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M36,78L27,67L32,67L32,58L40,58L40,67L45,67Z" />
+    <!-- イコライザ: 3 本の溝とつまみ -->
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M58,32h3v44h-3zM68,32h3v44h-3zM78,32h3v44h-3z" />
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M54,57h11v6h-11zM64,41h11v6h-11zM74,62h11v6h-11z" />
+</vector>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 通知の小さな絵。左に上下の矢印、右に 2 本のフェーダー。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M6,2L10,7L7.5,7L7.5,10.5L4.5,10.5L4.5,7L2,7ZM6,22L2,17L4.5,17L4.5,13.5L7.5,13.5L7.5,17L10,17Z" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M14,3h2v18h-2zM19,3h2v18h-2zM12.5,13h5v3h-5zM17.5,6h5v3h-5z" />
+</vector>
