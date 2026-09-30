@@ -34,6 +34,8 @@ final class BandsView extends View {
 
     /** Column of the "全体" fader; the bands take columns 1..N. */
     private static final int MASTER = -2;
+    /** How far from a knob (dp, up or down) a touch still grabs it; farther is a scroll. */
+    private static final float GRAB = 28f;
 
     private final int[] steps = new int[Eq.N];
     private OnChange onChange;
@@ -209,10 +211,16 @@ final class BandsView extends View {
         if (!isEnabled()) return false;
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                // The knob moves with the finger, relative to where it was: a tap alone
-                // changes nothing, so the column can be grabbed anywhere without a jump.
                 int col = Math.max(0, Math.min(Eq.N, (int) (e.getX() / colW())));
-                dragging = col == 0 ? MASTER : col - 1;
+                int which = col == 0 ? MASTER : col - 1;
+                // Only near the knob: a finger landing elsewhere in the column is scrolling the
+                // screen past the faders. Grabbing anywhere (v3 and before) kept moving bands
+                // while the user only meant to scroll down.
+                float knobY = which == MASTER ? yAt(mean()) : yOf(steps[which]);
+                if (Math.abs(e.getY() - knobY) > GRAB * dp) return false;
+                // The knob moves with the finger, relative to where it was: a touch alone
+                // changes nothing, so grabbing a little off the knob does not make it jump.
+                dragging = which;
                 downY = e.getY();
                 if (dragging == MASTER) {
                     System.arraycopy(steps, 0, downSteps, 0, Eq.N);
