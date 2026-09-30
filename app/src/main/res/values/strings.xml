@@ -31,8 +31,13 @@
     <string name="bass_hint">低音を持ち上げます。大きな低音は抑えるので、上げても歪みにくくなります（端末標準のイコライザで代用中は単純な持ち上げ）。</string>
 
     <!-- 音量キー（旧 volzz） -->
-    <string name="keys_title">音量キー</string>
-    <string name="back_desc">メイン画面に戻る</string>
+    <string name="tab_eq">イコライザ</string>
+    <string name="tab_keys">音量キー</string>
+    <string name="tab_steps">音量段階</string>
+    <string name="eq_enabled_label">イコライザを使う</string>
+    <string name="steps_service_ok">音量キーのサービス: 動作中</string>
+    <string name="steps_service_off">音量キーのサービスが止まっています。細かい音量は音量キーの短押しで動くので、ユーザー補助（アクセシビリティ）の設定で ikoras を ON にしてください。</string>
+    <string name="steps_keys_off">「音量キー」タブの「音量キーを使う」が OFF なので、細かい音量も働きません。</string>
 
     <string name="service_description">音量キーの長押し・超長押しで曲送りやアプリ起動を、短押しでハードウェア段階より細かい音量調整をします。画面の内容は一切読み取りません。音量キー以外のキーには触れません。</string>
     <string name="service_summary">音量キーの長押しで曲送り、短押しで細かい音量</string>
@@ -85,8 +90,8 @@
     <string name="action_app_failed">アプリを起動できませんでした: %1$s</string>
 
     <string name="fine_title">細かい音量</string>
-    <string name="fine_enabled_label">ハード段階より細かく刻む</string>
-    <string name="fine_enabled_desc">短押し 1 回で動く量を細かくします。切ると今までどおり 1 押し 1 段です。長押しの曲送りはどちらでも変わりません。</string>
+    <string name="fine_enabled_label">細かい音量を使う</string>
+    <string name="fine_enabled_desc">音量キーの短押し 1 回で動く量を、端末のハード段階より細かくします。切ると今までどおり 1 押し 1 段です。長押しの曲送りはどちらでも変わりません。</string>
     <string name="fine_steps_value">%1$d 段</string>
     <string name="fine_steps_detail">1 段あたり約 %1$.2f dB。この端末の標準は %2$d 段で、1 段あたり約 %3$.2f dB です。</string>
     <string name="fine_desc_more">端末のハード段階は増やせません（起動時に読まれる読み取り専用の設定で決まります）。そこで段と段の隙間を、音声エフェクトの負のゲインで埋めています。

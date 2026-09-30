@@ -8,14 +8,12 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.ResolveInfo;
-import android.os.Bundle;
 import android.provider.Settings;
 import android.media.AudioDeviceCallback;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.text.TextUtils;
 import android.view.View;
-import android.view.WindowInsets;
 import android.view.accessibility.AccessibilityManager;
 import android.widget.Button;
 import android.widget.CompoundButton;
@@ -32,8 +30,13 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** 設定と、実機で動きを確かめるための状態表示。 */
-public class VolumeActivity extends Activity {
+/**
+ * 「音量キー」と「音量段階」のタブ（元 volzz の設定画面）。メイン画面の中で動く。
+ * 以前は別の画面（VolumeActivity）で、「＜」でメイン画面に戻っていた。
+ */
+final class KeysPage {
+
+    private final Activity a;
 
     private Prefs prefs;
 
@@ -54,6 +57,9 @@ public class VolumeActivity extends Activity {
     private SeekBar fineSteps;
     private TextView fineStepsLabel;
     private TextView fineStepsDetail;
+    /** 「音量段階」タブの上: 細かい音量が働く前提（音量キーのサービス）の状態。 */
+    private TextView stepsService;
+    private Button stepsOpenSettings;
 
     private int pendingFineSteps;
 
@@ -95,30 +101,25 @@ public class VolumeActivity extends Activity {
         }
     };
 
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_volume);
-        // Back to the main screen: this one is only reached from there.
-        findViewById(R.id.back).setOnClickListener(v -> finish());
-        prefs = new Prefs(this);
+    /** 2 つのタブのレイアウトは、画面に入ってから渡す（id はどちらのタブからでも引ける）。 */
+    KeysPage(Activity activity) {
+        a = activity;
+        prefs = new Prefs(a);
 
-        applySystemBarInsets();
-
-        status = findViewById(R.id.status);
-        diag = findViewById(R.id.diag);
-        openSettings = findViewById(R.id.open_settings);
-        enabled = findViewById(R.id.enabled);
-        onlyWhilePlaying = findViewById(R.id.only_while_playing);
-        vibrate = findViewById(R.id.vibrate);
-        threshold = findViewById(R.id.threshold);
-        thresholdLabel = findViewById(R.id.threshold_label);
-        superThreshold = findViewById(R.id.super_threshold);
-        superThresholdLabel = findViewById(R.id.super_threshold_label);
-        superThresholdDetail = findViewById(R.id.super_threshold_detail);
-        ((TextView) findViewById(R.id.super_threshold_more_text)).setText(
-                getString(R.string.super_threshold_more, Prefs.SUPER_GAP_MIN));
-        vibrateWarning = findViewById(R.id.vibrate_warning);
+        status = a.findViewById(R.id.status);
+        diag = a.findViewById(R.id.diag);
+        openSettings = a.findViewById(R.id.open_settings);
+        enabled = a.findViewById(R.id.enabled);
+        onlyWhilePlaying = a.findViewById(R.id.only_while_playing);
+        vibrate = a.findViewById(R.id.vibrate);
+        threshold = a.findViewById(R.id.threshold);
+        thresholdLabel = a.findViewById(R.id.threshold_label);
+        superThreshold = a.findViewById(R.id.super_threshold);
+        superThresholdLabel = a.findViewById(R.id.super_threshold_label);
+        superThresholdDetail = a.findViewById(R.id.super_threshold_detail);
+        ((TextView) a.findViewById(R.id.super_threshold_more_text)).setText(
+                a.getString(R.string.super_threshold_more, Prefs.SUPER_GAP_MIN));
+        vibrateWarning = a.findViewById(R.id.vibrate_warning);
         wireMore(R.id.vibrate_more_toggle, R.id.vibrate_more);
         wireMore(R.id.assign_more_toggle, R.id.assign_more);
         wireMore(R.id.fine_more_toggle, R.id.fine_more);
@@ -126,11 +127,14 @@ public class VolumeActivity extends Activity {
         wireMore(R.id.mode_more_toggle, R.id.mode_more);
         wireMore(R.id.diag_more_toggle, R.id.diag_more);
         wireMore(R.id.perm_more_toggle, R.id.perm_more);
-        fineStatus = findViewById(R.id.fine_status);
-        fineEnabled = findViewById(R.id.fine_enabled);
-        fineSteps = findViewById(R.id.fine_steps);
-        fineStepsLabel = findViewById(R.id.fine_steps_label);
-        fineStepsDetail = findViewById(R.id.fine_steps_detail);
+        fineStatus = a.findViewById(R.id.fine_status);
+        fineEnabled = a.findViewById(R.id.fine_enabled);
+        fineSteps = a.findViewById(R.id.fine_steps);
+        fineStepsLabel = a.findViewById(R.id.fine_steps_label);
+        fineStepsDetail = a.findViewById(R.id.fine_steps_detail);
+        stepsService = a.findViewById(R.id.steps_service);
+        stepsOpenSettings = a.findViewById(R.id.steps_open_settings);
+        stepsOpenSettings.setOnClickListener(v -> openAccessibilitySettings());
 
         openSettings.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -164,7 +168,7 @@ public class VolumeActivity extends Activity {
                 prefs.setVibrate(checked);
                 if (checked) {
                     // どんな手応えか確かめられる
-                    Media.buzz(VolumeActivity.this, Action.pattern(Action.NEXT));
+                    Media.buzz(a, Action.pattern(Action.NEXT));
                 }
                 refresh();                    // 端末側で振動が切られている警告の出し入れ
             }
@@ -276,7 +280,7 @@ public class VolumeActivity extends Activity {
     // ------------------------------------------------------------------
 
     private void setUpAssign(final int index) {
-        final Button button = findViewById(ASSIGN_ID[index]);
+        final Button button = a.findViewById(ASSIGN_ID[index]);
         button.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -289,9 +293,9 @@ public class VolumeActivity extends Activity {
     private void showAssign(int index) {
         final boolean up = ASSIGN_UP[index];
         final boolean sup = ASSIGN_SUPER[index];
-        final Button button = findViewById(ASSIGN_ID[index]);
-        button.setText(getString(R.string.assign_row, getString(ASSIGN_NAME[index]),
-                Action.label(this, prefs.action(up, sup), prefs.appPackage(up, sup))));
+        final Button button = a.findViewById(ASSIGN_ID[index]);
+        button.setText(a.getString(R.string.assign_row, a.getString(ASSIGN_NAME[index]),
+                Action.label(a, prefs.action(up, sup), prefs.appPackage(up, sup))));
     }
 
     private void pickAction(final int index) {
@@ -299,11 +303,11 @@ public class VolumeActivity extends Activity {
         for (int i = 0; i < Action.ALL.length; i++) {
             // アプリだけは「どれを起動するか」がこの後に来るので、名前ではなく誘いを出す。
             items[i] = (Action.ALL[i] == Action.APP)
-                    ? getString(R.string.action_app)
-                    : Action.label(this, Action.ALL[i], "");
+                    ? a.getString(R.string.action_app)
+                    : Action.label(a, Action.ALL[i], "");
         }
-        new AlertDialog.Builder(this)
-                .setTitle(getString(R.string.assign_pick_action, getString(ASSIGN_NAME[index])))
+        new AlertDialog.Builder(a)
+                .setTitle(a.getString(R.string.assign_pick_action, a.getString(ASSIGN_NAME[index])))
                 .setItems(items, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
@@ -326,15 +330,15 @@ public class VolumeActivity extends Activity {
      * それぞれディスクに触る）ので、別のスレッドで作ってから画面に出す。
      */
     private void pickApp(final int index) {
-        Toast.makeText(this, R.string.assign_loading, Toast.LENGTH_SHORT).show();
+        Toast.makeText(a, R.string.assign_loading, Toast.LENGTH_SHORT).show();
         new Thread(new Runnable() {
             @Override
             public void run() {
                 final List<String[]> apps = launchableApps();
-                runOnUiThread(new Runnable() {
+                a.runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        if (isFinishing() || isDestroyed()) {
+                        if (a.isFinishing() || a.isDestroyed()) {
                             return;
                         }
                         showAppDialog(index, apps);
@@ -349,7 +353,7 @@ public class VolumeActivity extends Activity {
         for (int i = 0; i < apps.size(); i++) {
             items[i] = apps.get(i)[0];
         }
-        new AlertDialog.Builder(this)
+        new AlertDialog.Builder(a)
                 .setTitle(R.string.assign_pick_app)
                 .setItems(items, new DialogInterface.OnClickListener() {
                     @Override
@@ -375,7 +379,7 @@ public class VolumeActivity extends Activity {
         final Intent main = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
         List<ResolveInfo> found;
         try {
-            found = getPackageManager().queryIntentActivities(main, 0);
+            found = a.getPackageManager().queryIntentActivities(main, 0);
         } catch (RuntimeException e) {
             return out;
         }
@@ -388,7 +392,7 @@ public class VolumeActivity extends Activity {
             if (pkg == null || !seen.add(pkg)) {
                 continue;
             }
-            final CharSequence label = info.loadLabel(getPackageManager());
+            final CharSequence label = info.loadLabel(a.getPackageManager());
             out.add(new String[]{label == null ? pkg : label.toString(), pkg});
         }
         final Collator collator = Collator.getInstance();
@@ -408,12 +412,12 @@ public class VolumeActivity extends Activity {
 
     /** 段階数の表示。サービスが経がっていなくても端末のカーブは読めるので出す。 */
     private void showFineSteps() {
-        fineStepsLabel.setText(getString(R.string.fine_steps_value, pendingFineSteps));
+        fineStepsLabel.setText(a.getString(R.string.fine_steps_value, pendingFineSteps));
 
         final VolumeCurve curve = currentCurve();
         final float mine = FineScale.dbPerStep(curve, pendingFineSteps);
         final float theirs = FineScale.dbPerStep(curve, curve.maxIndex + 1);
-        fineStepsDetail.setText(getString(R.string.fine_steps_detail,
+        fineStepsDetail.setText(a.getString(R.string.fine_steps_detail,
                 mine, curve.maxIndex, theirs));
     }
 
@@ -422,7 +426,7 @@ public class VolumeActivity extends Activity {
         if (fv != null && fv.curve() != null) {
             return fv.curve();
         }
-        final AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        final AudioManager am = (AudioManager) a.getSystemService(Context.AUDIO_SERVICE);
         // サービスがまだ繋がっていないときの代用。負ゲインが使える前提の下限で出す。
         return VolumeCurve.read(am, VolumeCurve.currentOutputDeviceType(am),
                 FineScale.FLOOR_DB);
@@ -438,7 +442,7 @@ public class VolumeActivity extends Activity {
     private List<String> otherKeyFilteringServices() {
         final List<String> names = new ArrayList<>();
         final AccessibilityManager manager =
-                (AccessibilityManager) getSystemService(Context.ACCESSIBILITY_SERVICE);
+                (AccessibilityManager) a.getSystemService(Context.ACCESSIBILITY_SERVICE);
         if (manager == null) {
             return names;
         }
@@ -454,7 +458,7 @@ public class VolumeActivity extends Activity {
         }
         for (AccessibilityServiceInfo info : list) {
             final String id = info.getId();
-            if (id == null || id.startsWith(getPackageName() + "/")) {
+            if (id == null || id.startsWith(a.getPackageName() + "/")) {
                 continue;
             }
             if ((info.getCapabilities()
@@ -462,7 +466,7 @@ public class VolumeActivity extends Activity {
                 continue;
             }
             final CharSequence label = (info.getResolveInfo() == null ? null
-                    : info.getResolveInfo().loadLabel(getPackageManager()));
+                    : info.getResolveInfo().loadLabel(a.getPackageManager()));
             names.add(label == null || label.length() == 0
                     ? id.substring(0, Math.max(0, id.indexOf('/')))
                     : label.toString());
@@ -470,29 +474,25 @@ public class VolumeActivity extends Activity {
         return names;
     }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
+    void resume() {
         // 何も起きていないのに描き直さない。開いたときに 1 回と、
         // キーの押下・サービスの接続などで値が変わったときだけ描く。
         // 設定アプリでサービスを入り切りして戻ったときも、ここを通る。
         rivals = otherKeyFilteringServices();
         Prefs.setChangeListener(onChanged);
-        final AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        final AudioManager am = (AudioManager) a.getSystemService(Context.AUDIO_SERVICE);
         if (am != null) {
             am.registerAudioDeviceCallback(deviceCallback, null);
         }
         refresh();
     }
 
-    @Override
-    protected void onPause() {
+    void pause() {
         Prefs.setChangeListener(null);
-        final AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        final AudioManager am = (AudioManager) a.getSystemService(Context.AUDIO_SERVICE);
         if (am != null) {
             am.unregisterAudioDeviceCallback(deviceCallback);
         }
-        super.onPause();
     }
 
     /**
@@ -502,8 +502,8 @@ public class VolumeActivity extends Activity {
      * 開いた状態は覚えない（画面を開き直せばまた閉じている）。
      */
     private void wireMore(int toggleId, int bodyId) {
-        final TextView toggle = findViewById(toggleId);
-        final View body = findViewById(bodyId);
+        final TextView toggle = a.findViewById(toggleId);
+        final View body = a.findViewById(bodyId);
         toggle.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -514,33 +514,8 @@ public class VolumeActivity extends Activity {
         });
     }
 
-    /**
-     * ステータスバーとナビゲーションバーの分だけ余白を空ける。
-     *
-     * targetSdk 35 以降のアプリは端から端まで描画する（edge-to-edge）のが既定に
-     * なったため、何もしないと画面の上下がバーの裏に潜って読めなくなる。
-     * getSystemWindowInset* は非推奨だが API 28 から 36 まで一本のコードで済み、
-     * systemBars と同じ値を返す。
-     */
-    @SuppressWarnings("deprecation")
-    private void applySystemBarInsets() {
-        final View root = findViewById(R.id.root);
-        root.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
-            @Override
-            public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
-                v.setPadding(
-                        insets.getSystemWindowInsetLeft(),
-                        insets.getSystemWindowInsetTop(),
-                        insets.getSystemWindowInsetRight(),
-                        insets.getSystemWindowInsetBottom());
-                return insets;
-            }
-        });
-        root.requestApplyInsets();
-    }
-
     private void showThreshold(int ms) {
-        thresholdLabel.setText(getString(R.string.threshold_value, ms));
+        thresholdLabel.setText(a.getString(R.string.threshold_value, ms));
     }
 
     private void showSuperThreshold() {
@@ -556,8 +531,8 @@ public class VolumeActivity extends Activity {
     private void showSuperThreshold(int ms) {
         final int longMs = prefs.thresholdMs();
         final int effective = Math.max(ms, longMs + Prefs.SUPER_GAP_MIN);
-        superThresholdLabel.setText(getString(R.string.super_threshold_value, effective));
-        superThresholdDetail.setText(getString(R.string.super_threshold_detail,
+        superThresholdLabel.setText(a.getString(R.string.super_threshold_value, effective));
+        superThresholdDetail.setText(a.getString(R.string.super_threshold_detail,
                 longMs, effective - longMs));
     }
 
@@ -573,6 +548,11 @@ public class VolumeActivity extends Activity {
             status.setText(R.string.status_off);
         }
         openSettings.setText(granted ? R.string.open_settings_again : R.string.open_settings);
+        // 細かい音量は音量キーの短押しで動くので、そちらが止まっていれば「音量段階」タブにも出す。
+        stepsService.setText(!connected ? R.string.steps_service_off
+                : !prefs.enabled() ? R.string.steps_keys_off : R.string.steps_service_ok);
+        stepsOpenSettings.setVisibility(connected ? View.GONE : View.VISIBLE);
+        stepsOpenSettings.setText(granted ? R.string.open_settings_again : R.string.open_settings);
 
         refreshFineStatus();
         for (int i = 0; i < ASSIGN_ID.length; i++) {
@@ -581,13 +561,13 @@ public class VolumeActivity extends Activity {
 
         // 端末側で切られていると volzz の振動も鳴らない。原因がここだと分かるように。
         // 動作確認は折り畳まれているので、振動のスイッチのすぐ下に出す。
-        vibrateWarning.setVisibility(prefs.vibrate() && Prefs.systemVibrationOff(this)
+        vibrateWarning.setVisibility(prefs.vibrate() && Prefs.systemVibrationOff(a)
                 ? View.VISIBLE : View.GONE);
 
         final StringBuilder sb = new StringBuilder();
-        sb.append(getString(R.string.diag_count, Prefs.keyEventCount));
-        sb.append('\n').append(getString(R.string.diag_count_dark, Prefs.screenOffKeyCount));
-        sb.append('\n').append(getString(R.string.diag_count_keep_top, Prefs.keepTopCount));
+        sb.append(a.getString(R.string.diag_count, Prefs.keyEventCount));
+        sb.append('\n').append(a.getString(R.string.diag_count_dark, Prefs.screenOffKeyCount));
+        sb.append('\n').append(a.getString(R.string.diag_count_keep_top, Prefs.keepTopCount));
 
         if (!TextUtils.isEmpty(Prefs.fineLastDetail)) {
             sb.append('\n').append("細かい音量: ").append(Prefs.fineLastDetail);
@@ -595,12 +575,12 @@ public class VolumeActivity extends Activity {
 
         final String[] notes = Prefs.recentNotes();
         if (notes.length > 0) {
-            sb.append('\n').append(getString(R.string.diag_log_title));
+            sb.append('\n').append(a.getString(R.string.diag_log_title));
             for (String note : notes) {
                 sb.append('\n').append(note);
             }
         } else if (!TextUtils.isEmpty(Prefs.lastNote)) {
-            sb.append('\n').append(getString(R.string.diag_last, Prefs.lastNote));
+            sb.append('\n').append(a.getString(R.string.diag_last, Prefs.lastNote));
         }
         diag.setText(sb.toString());
     }
@@ -611,25 +591,25 @@ public class VolumeActivity extends Activity {
         final StringBuilder sb = new StringBuilder();
 
         if (fv == null) {
-            sb.append(getString(R.string.fine_st_waiting));
+            sb.append(a.getString(R.string.fine_st_waiting));
         } else if (!fv.hasEffect()) {
-            sb.append(getString(R.string.fine_st_effect_none));
+            sb.append(a.getString(R.string.fine_st_effect_none));
         } else if (fv.effectBestEffort()) {
-            sb.append(getString(R.string.fine_st_effect_weak, fv.effectLabel()));
+            sb.append(a.getString(R.string.fine_st_effect_weak, fv.effectLabel()));
         } else {
-            sb.append(getString(R.string.fine_st_effect, fv.effectLabel()));
+            sb.append(a.getString(R.string.fine_st_effect, fv.effectLabel()));
         }
 
-        sb.append('\n').append(getString(R.string.fine_st_device,
+        sb.append('\n').append(a.getString(R.string.fine_st_device,
                 VolumeCurve.deviceLabel(curve.deviceType), curve.maxIndex, curve.floorDb()));
 
         if (fv != null && fv.hasEffect()) {
-            sb.append('\n').append(getString(R.string.fine_st_level,
+            sb.append('\n').append(a.getString(R.string.fine_st_level,
                     fv.level(), fv.steps(), fv.currentDb()));
         }
 
         if (!rivals.isEmpty()) {
-            sb.append('\n').append(getString(R.string.fine_st_conflict,
+            sb.append('\n').append(a.getString(R.string.fine_st_conflict,
                     TextUtils.join("、", rivals)));
         }
 
@@ -639,12 +619,12 @@ public class VolumeActivity extends Activity {
     /** 設定画面でこのサービスが有効にされているか。権限は要らない。 */
     private boolean isServiceEnabledInSettings() {
         final String flat = Settings.Secure.getString(
-                getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+                a.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         if (TextUtils.isEmpty(flat)) {
             return false;
         }
-        final String me = new ComponentName(this, KeyService.class).flattenToString();
-        final String meShort = new ComponentName(this, KeyService.class).flattenToShortString();
+        final String me = new ComponentName(a, KeyService.class).flattenToString();
+        final String meShort = new ComponentName(a, KeyService.class).flattenToShortString();
         for (String entry : flat.split(":")) {
             if (me.equalsIgnoreCase(entry) || meShort.equalsIgnoreCase(entry)) {
                 return true;
@@ -655,7 +635,7 @@ public class VolumeActivity extends Activity {
 
     private void openAccessibilitySettings() {
         try {
-            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+            a.startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         } catch (Exception e) {
             status.setText(R.string.status_no_settings);

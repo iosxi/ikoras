@@ -1,50 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/root"
+<!-- 「音量キー」タブ（元 volzz）: 先頭はこのタブ専用のスイッチ -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:fillViewport="true">
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingLeft="16dp"
+    android:paddingRight="16dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="32dp">
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:paddingLeft="20dp"
-        android:paddingRight="20dp"
-        android:paddingTop="20dp"
-        android:paddingBottom="32dp">
-
-        <!-- 見出し。左の「＜」でメイン画面に戻る。 -->
-        <LinearLayout
+        <Switch
+            android:id="@+id/enabled"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:text="@string/enabled_label"
+            android:textStyle="bold"
+            android:textSize="16sp" />
 
-            <TextView
-                android:id="@+id/back"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_marginStart="-12dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/back_desc"
-                android:gravity="center"
-                android:text="＜"
-                android:textSize="26sp" />
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/keys_title"
-                android:textSize="32sp"
-                android:textStyle="bold" />
-        </LinearLayout>
-
+        <TextView
+            style="@style/Hint"
+            android:text="@string/enabled_desc" />
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
+            android:layout_marginTop="12dp"
             android:text="@string/intro"
             android:textSize="14sp" />
 
@@ -73,16 +52,6 @@
             style="@style/SectionTitle"
             android:text="@string/settings_title" />
 
-        <Switch
-            android:id="@+id/enabled"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/enabled_label"
-            android:textSize="16sp" />
-
-        <TextView
-            style="@style/Hint"
-            android:text="@string/enabled_desc" />
 
         <Switch
             android:id="@+id/only_while_playing"
@@ -172,64 +141,6 @@
             <TextView
                 style="@style/Hint"
                 android:text="@string/assign_more" />
-        </LinearLayout>
-
-        <!-- 細かい音量 -->
-        <TextView
-            style="@style/SectionTitle"
-            android:text="@string/fine_title" />
-
-        <TextView
-            android:id="@+id/fine_status"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="14sp" />
-
-        <Switch
-            android:id="@+id/fine_enabled"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="@string/fine_enabled_label"
-            android:textSize="16sp" />
-
-        <TextView
-            style="@style/Hint"
-            android:text="@string/fine_enabled_desc" />
-
-        <TextView
-            android:id="@+id/fine_steps_label"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:textSize="16sp"
-            android:textStyle="bold" />
-
-        <SeekBar
-            android:id="@+id/fine_steps"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp" />
-
-        <TextView
-            android:id="@+id/fine_steps_detail"
-            style="@style/Hint" />
-
-        <TextView
-            style="@style/Hint"
-            android:text="@string/fine_desc" />
-
-        <TextView
-            android:id="@+id/fine_more_toggle"
-            style="@style/More" />
-
-        <LinearLayout
-            android:id="@+id/fine_more"
-            style="@style/MoreBody">
-
-            <TextView
-                style="@style/Hint"
-                android:text="@string/fine_desc_more" />
         </LinearLayout>
 
         <!-- 長押し時間 -->
@@ -358,5 +269,5 @@
                 android:text="@string/perm_more" />
         </LinearLayout>
 
-    </LinearLayout>
-</ScrollView>
+    
+</LinearLayout>

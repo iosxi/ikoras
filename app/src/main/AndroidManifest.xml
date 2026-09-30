@@ -66,12 +66,6 @@
             android:name=".DevicesActivity"
             android:exported="false" />
 
-        <!-- The volume keys: long press, fine volume (was volzz). Its own light theme, as before. -->
-        <activity
-            android:name=".VolumeActivity"
-            android:exported="false"
-            android:label="@string/keys_title" />
-
         <!-- Players announce the audio session they start and stop playing. -->
         <receiver
             android:name=".SessionReceiver"

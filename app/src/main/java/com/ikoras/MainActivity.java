@@ -33,6 +33,7 @@ import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
@@ -58,8 +59,6 @@ public class MainActivity extends Activity {
     private Button listenerOpen;
     /** The same, up front where a user sees it, until granted or dismissed. */
     private View listenerCard;
-    /** Opens the volume keys' settings (was volzz), saying whether they are on. */
-    private Button keys;
     /** ikora-lite or volzz installed alongside: they fight over the same effects and keys. */
     private TextView rivals;
     /** Which output's settings the faders and BASS show. */
@@ -86,6 +85,8 @@ public class MainActivity extends Activity {
     private RadioButton pickSelf;
     /** Set while the code, not the user, moves the switch or the picker. */
     private boolean syncing;
+    /** The 音量キー and 音量段階 tabs (was volzz's own screen). */
+    private KeysPage keysTabs;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private boolean resumed;
@@ -100,6 +101,8 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         setContentView(build());
+        // The volume keys' and steps' tabs, bound once their layouts are on screen.
+        keysTabs = new KeysPage(this);
         fromPlayer(getIntent());
     }
 
@@ -142,6 +145,7 @@ public class MainActivity extends Activity {
         readChain(null);
         getSystemService(AudioManager.class).registerAudioPlaybackCallback(playback, main);
         if (!canDump() && isOpen("detail")) probe(null);
+        keysTabs.resume();
     }
 
     @Override
@@ -151,6 +155,7 @@ public class MainActivity extends Activity {
         main.removeCallbacks(retry);
         getSystemService(AudioManager.class).unregisterAudioPlaybackCallback(playback);
         Eq.listener = null;
+        keysTabs.pause();
     }
 
     /** A player started or stopped: whether music plays (and a session was missed) may have changed. */
@@ -234,9 +239,10 @@ public class MainActivity extends Activity {
         col.setPadding(pad, pad, pad, pad);
 
         // --- Always visible: what is used every day ---
+        // This tab's own switch: the equalizer only (the volume keys and steps have theirs).
         power = new Switch(this);
-        power.setText(R.string.app_name);
-        power.setTextSize(20);
+        power.setText(R.string.eq_enabled_label);
+        power.setTextSize(16);
         power.setTypeface(Typeface.DEFAULT_BOLD);
         power.setOnCheckedChangeListener((b, on) -> {
             if (!syncing) setOn(on);
@@ -257,10 +263,7 @@ public class MainActivity extends Activity {
 
         col.addView(batteryHint());
         col.addView(listenerHint());
-        rivals = new TextView(this);
-        rivals.setTextColor(0xFFD32F2F);
-        rivals.setPadding(0, dp(12), 0, 0);
-        col.addView(rivals);
+
 
         outputView = new TextView(this);
         outputView.setPadding(0, dp(12), 0, 0);
@@ -270,11 +273,6 @@ public class MainActivity extends Activity {
         devices.setAllCaps(false);
         devices.setOnClickListener(v -> startActivity(new Intent(this, DevicesActivity.class)));
         col.addView(devices);
-        // The volume keys (long press, fine volume): what volzz was.
-        keys = new Button(this);
-        keys.setAllCaps(false);
-        keys.setOnClickListener(v -> startActivity(new Intent(this, VolumeActivity.class)));
-        col.addView(keys);
 
         // Wrapped onto as many rows as needed: all of them in sight, none behind a scroll.
         presets = new Flow(this);
@@ -424,15 +422,94 @@ public class MainActivity extends Activity {
         send.setOnClickListener(v -> sendReport());
         diag.addView(send);
 
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(col);
+        // Three tabs: the equalizer (was ikora-lite), the volume keys (was volzz) and the
+        // volume steps (was voom, then part of volzz). One screen, the tab bar on top.
+        ScrollView eqPage = new ScrollView(this);
+        eqPage.addView(col);
+        ScrollView keysPage = new ScrollView(this);
+        keysPage.addView(getLayoutInflater().inflate(R.layout.tab_keys, keysPage, false));
+        ScrollView stepsPage = new ScrollView(this);
+        stepsPage.addView(getLayoutInflater().inflate(R.layout.tab_steps, stepsPage, false));
+        pages = new View[]{eqPage, keysPage, stepsPage};
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        TextView title = new TextView(this);
+        title.setText(R.string.app_name);
+        title.setTextSize(22);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setPadding(pad, dp(12), pad, dp(4));
+        root.addView(title);
+        root.addView(tabBar(new int[]{R.string.tab_eq, R.string.tab_keys, R.string.tab_steps}));
+        // Concerns every tab: the apps ikoras was made from fight over effects and keys.
+        rivals = new TextView(this);
+        rivals.setTextColor(0xFFD32F2F);
+        rivals.setPadding(pad, dp(8), pad, 0);
+        root.addView(rivals);
+        FrameLayout content = new FrameLayout(this);
+        for (View page : pages) content.addView(page);
+        root.addView(content, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        showTab(ui().getInt("tab", 0));
+
         // targetSdk 35+ draws edge to edge: keep content clear of the system bars.
-        scroll.setOnApplyWindowInsetsListener((v, in) -> {
+        root.setOnApplyWindowInsetsListener((v, in) -> {
             v.setPadding(in.getSystemWindowInsetLeft(), in.getSystemWindowInsetTop(),
                     in.getSystemWindowInsetRight(), in.getSystemWindowInsetBottom());
             return in.consumeSystemWindowInsets();
         });
-        return scroll;
+        return root;
+    }
+
+    // --- Tabs -------------------------------------------------------------------------------
+
+    /** The three pages, in tab order; one shows at a time. */
+    private View[] pages;
+    private TextView[] tabLabels;
+    private View[] tabLines;
+
+    /** Equal-width tabs; the chosen one bold, in the accent colour, underlined. */
+    private View tabBar(int[] names) {
+        LinearLayout bar = new LinearLayout(this);
+        tabLabels = new TextView[names.length];
+        tabLines = new View[names.length];
+        for (int i = 0; i < names.length; i++) {
+            LinearLayout tab = new LinearLayout(this);
+            tab.setOrientation(LinearLayout.VERTICAL);
+            tab.setBackgroundResource(ripple());
+            TextView t = new TextView(this);
+            t.setText(names[i]);
+            t.setTextSize(15);
+            t.setGravity(Gravity.CENTER);
+            t.setPadding(0, dp(12), 0, dp(10));
+            tab.addView(t);
+            View line = new View(this);
+            line.setBackgroundColor(getColor(R.color.text_accent));
+            tab.addView(line, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3)));
+            int index = i;
+            tab.setOnClickListener(v -> showTab(index));
+            tabLabels[i] = t;
+            tabLines[i] = line;
+            bar.addView(tab, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        }
+        return bar;
+    }
+
+    private void showTab(int index) {
+        if (index < 0 || index >= pages.length) index = 0;
+        ui().edit().putInt("tab", index).apply();
+        for (int i = 0; i < pages.length; i++) {
+            boolean on = i == index;
+            pages[i].setVisibility(on ? View.VISIBLE : View.GONE);
+            tabLabels[i].setTypeface(on ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            tabLabels[i].setTextColor(getColor(on ? R.color.text_accent : R.color.text_hint));
+            tabLines[i].setVisibility(on ? View.VISIBLE : View.INVISIBLE);
+        }
+    }
+
+    private int ripple() {
+        android.util.TypedValue t = new android.util.TypedValue();
+        getTheme().resolveAttribute(android.R.attr.selectableItemBackground, t, true);
+        return t.resourceId;
     }
 
     // --- Accordion ------------------------------------------------------------------------
@@ -698,8 +775,7 @@ public class MainActivity extends Activity {
         String r = rivalApps();
         rivals.setVisibility(r == null ? View.GONE : View.VISIBLE);
         rivals.setText(r);
-        keys.setText(KeyService.instance != null ? "音量キー（長押し・細かい音量）… 動作中"
-                : "音量キー（長押し・細かい音量）… 停止中");
+
         syncControls();
         showOutput();
         status.setText(summary());
@@ -907,7 +983,7 @@ public class MainActivity extends Activity {
                 sb.append("ikoras はオフ（").append(player).append(" を再生中）");
             } else if (Eq.working(e.getKey()) && !Diag.mediaPlaying(this)) {
                 // Attached (possibly restored after an update) but nothing sounds right now.
-                bold(sb, "✓ " + player + " に付いています（再生を待っています）");
+                bold(sb, "✓ " + player + " の再生を待っています");
             } else if (Eq.working(e.getKey())) {
                 bold(sb, "✓ " + player + " に ikoras が効いています");
             } else {
