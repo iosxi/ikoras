@@ -72,7 +72,16 @@ volzz: 長押しと超長押し・画面が消えているとき・細かい音�
 インストール時に自動で付くもの: `MODIFY_AUDIO_SETTINGS`、`VIBRATE`、`FOREGROUND_SERVICE`、
 `FOREGROUND_SERVICE_SPECIAL_USE`、`RECEIVE_BOOT_COMPLETED`。
 使うときだけ求めるもの: 通知の表示（常駐・全体モード）、付近のデバイス（機器プリセット）。
-利用者が設定で ON にするもの: ユーザー補助（音量キー）、通知へのアクセス（YouTube の再生中か知るため。通知の中身は読まない）。
+利用者が設定で ON にするもの: ユーザー補助（音量キー）、通知へのアクセス。
+通知へのアクセスは通知を読むためではなく、YouTube が再生中かをメディアセッションで読むために要る。
+ほかのアプリのメディアセッションを読む `MediaSessionManager.getActiveSessions()` は、呼び出し元が
+`MEDIA_CONTENT_CONTROL`（保護レベル signature|privileged で、一般のアプリには付かない）を持つか、
+**有効な通知リスナーであること**を条件にしている（AOSP の `MediaSessionManager` の説明）。ikoras は後者の資格のためだけに
+通知リスナーを置き、`onNotificationPosted` は持たない。
+なお、メディアセッションで分かるのは「再生中か」までで、イコライザを付けるのに要る音声セッションの番号は含まれない
+（`MediaController.PlaybackInfo` にあるのは再生の種類・音量・AudioAttributes・音量操作の ID だけ）。
+そのため YouTube の再生中は全体に効かせる。
+通知の表示の許可（`POST_NOTIFICATIONS`）は別物で、常駐の表示を見せるためだけ。許可しなくても常駐は動く。
 `DUMP` は宣言だけで、`adb shell pm grant com.ikoras android.permission.DUMP` をしたときだけ有効（詳しい状態の表示と、YouTube の再生そのものへの付け方）。
 
 ## 限界
