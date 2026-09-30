@@ -24,6 +24,10 @@
     <string name="watch_hint_dump">DUMP が許可されているので、YouTube の再生そのものを見つけて付けます（全体には効かせません）。そのため常駐します。</string>
     <string name="watch_need_access">使うには、「通知へのアクセス」で ikoras を ON にしてください。どのアプリが再生中か（メディアセッション）を読むのに、Android がこの許可を条件にしているためです。通知の中身は読みません。</string>
     <string name="youtube_silent">YouTube（動画）なら、下の「動作の設定」の「YouTube（動画）にも効かせる」を使ってください。</string>
+    <string name="poweramp_title">Poweramp で使う</string>
+    <string name="poweramp_hint">Poweramp は、再生しているだけでは ikoras に再生の番号（音声セッション）を知らせません。Poweramp の設定で「MusicFX」を ON にし（設定の検索で「FX」と打つと出ます）、再生中に Tone/Vol 画面の「MusicFX」ボタンを押して、開くアプリに ikoras を選んでください。押したときだけ知らせてくれるので、Poweramp を終了して開き直したら、もう一度ボタンから開いてください（「通知へのアクセス」が ON なら、効いていないときに画面に出ます）。</string>
+    <string name="poweramp_card">Poweramp にも効かせるには: Poweramp の設定で「MusicFX」を ON にし（設定の検索で「FX」と打つと出ます）、再生中に Tone/Vol 画面の「MusicFX」ボタンを押して、開くアプリに ikoras を選んでください。</string>
+    <string name="poweramp_missed">Poweramp の設定で「MusicFX」を ON にし（設定の検索で「FX」）、Tone/Vol 画面の「MusicFX」ボタンから ikoras を開いてください。</string>
     <string name="listener_label">ikoras（YouTube の再生中か調べる）</string>
     <string name="listener_card">YouTube（動画）にも効かせるには、端末の設定の「通知へのアクセス」で ikoras を ON にしてください。どのアプリが再生中か（メディアセッション）を読むのに、Android がこの許可を条件にしているためで、通知の中身は読みません。
 スイッチが押せない（「制限付き設定」と出る）ときは、設定の「アプリ」→ ikoras →右上の ︙ →「制限付き設定を許可」のあとで、もう一度 ON にしてください。</string>

@@ -311,6 +311,7 @@ final class Eq {
             }
         }
         sessions.put(session, pkg);
+        if (Poweramp.PKG.equals(pkg)) Poweramp.markSeen(c);
         save(c);
         attachMissing(c);
         changed();
@@ -355,6 +356,16 @@ final class Eq {
         Diag.note(c, "前のプロセスのセッションを復元: " + sessions.keySet());
         attachMissing(c);
         changed();
+    }
+
+    /** Close every session a player opened (it has gone, and its sessions with it). */
+    static void closePackage(Context c, String pkg) {
+        for (Integer s : sessions.keySet().toArray(new Integer[0])) {
+            if (pkg.equals(sessions.get(s))) {
+                Diag.note(c, pkg + " が終わったので session " + s + " を手放す");
+                close(c, s);
+            }
+        }
     }
 
     static void close(Context c, int session) {
@@ -481,6 +492,11 @@ final class Eq {
 
     private static void changed() {
         if (listener != null) listener.run();
+    }
+
+    /** For state kept elsewhere that the screen shows (Poweramp playing). */
+    static void refreshScreens() {
+        changed();
     }
 
     // --- Effect engines -----------------------------------------------------------------

@@ -73,8 +73,15 @@ public class PlayingListener extends NotificationListenerService {
         for (MediaController c : watched) c.unregisterCallback(onState);
         watched.clear();
         if (sessions != null) {
+            // Poweramp gone (exited, killed): its audio session went with it, and the next one
+            // is told only by its MusicFX button. Drop the old one so the screen says so,
+            // rather than "✓ Poweramp" for a session nothing plays in any more.
+            boolean poweramp = false;
+            for (MediaController c : sessions) if (Poweramp.PKG.equals(c.getPackageName())) poweramp = true;
+            if (!poweramp) Eq.closePackage(this, Poweramp.PKG);
             for (MediaController c : sessions) {
-                if (!Watch.isSilent(c.getPackageName())) continue;
+                // YouTube (no session told), and Poweramp (told only by its MusicFX button).
+                if (!Watch.isSilent(c.getPackageName()) && !Poweramp.PKG.equals(c.getPackageName())) continue;
                 c.registerCallback(onState, main);
                 watched.add(c);
             }
@@ -83,11 +90,14 @@ public class PlayingListener extends NotificationListenerService {
     }
 
     private void judge() {
-        boolean playing = false;
+        boolean playing = false, poweramp = false;
         for (MediaController c : watched) {
             PlaybackState s = c.getPlaybackState();
-            if (s != null && plays(s.getState())) playing = true;
+            if (s == null || !plays(s.getState())) continue;
+            if (Poweramp.PKG.equals(c.getPackageName())) poweramp = true;
+            else playing = true;
         }
+        Poweramp.setPlaying(this, poweramp);
         Eq.setSilentPlaying(this, playing);
     }
 

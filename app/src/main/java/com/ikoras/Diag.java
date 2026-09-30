@@ -93,6 +93,7 @@ final class Diag {
             {"com.spotify.music", "Spotify"},
             {"com.amazon.mp3", "Amazon Music"},
             {"com.google.android.youtube", "YouTube（知らせを出さない。DUMP で探す）"},
+            {"com.maxmpz.audioplayer", "Poweramp（MusicFX ボタンを押したときだけ知らせる）"},
     };
 
     static String players(Context c) {

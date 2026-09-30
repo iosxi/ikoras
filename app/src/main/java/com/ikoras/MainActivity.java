@@ -59,6 +59,8 @@ public class MainActivity extends Activity {
     private Button listenerOpen;
     /** The same, up front where a user sees it, until granted or dismissed. */
     private View listenerCard;
+    /** How to reach Poweramp (its MusicFX button), until it has been done once or dismissed. */
+    private View powerampCard;
     /** ikora-lite or volzz installed alongside: they fight over the same effects and keys. */
     private TextView rivals;
     /** Which output's settings the faders and BASS show. */
@@ -115,6 +117,8 @@ public class MainActivity extends Activity {
     /** Opened from a player's equalizer menu: its session comes with the intent. */
     private void fromPlayer(Intent i) {
         int session = i.getIntExtra(AudioEffect.EXTRA_AUDIO_SESSION, 0);
+        // Opened from a player's equalizer button (Poweramp's MusicFX): the equalizer tab.
+        if (session > 0 && pages != null) showTab(0);
         if (session > 0 && !Eq.sessions.containsKey(session)) {
             Eq.open(this, session, i.getStringExtra(AudioEffect.EXTRA_PACKAGE_NAME));
             EqService.sync(this);
@@ -263,6 +267,7 @@ public class MainActivity extends Activity {
 
         col.addView(batteryHint());
         col.addView(listenerHint());
+        col.addView(powerampHint());
 
 
         outputView = new TextView(this);
@@ -375,6 +380,12 @@ public class MainActivity extends Activity {
         listenerOpen.setAllCaps(false);
         listenerOpen.setOnClickListener(v -> openListenerSettings());
         modes.addView(listenerOpen);
+        TextView pa = new TextView(this);
+        pa.setText(R.string.poweramp_title);
+        pa.setTypeface(Typeface.DEFAULT_BOLD);
+        pa.setPadding(0, dp(12), 0, 0);
+        modes.addView(pa);
+        modes.addView(hint(R.string.poweramp_hint));
         perOutput = new Switch(this);
         perOutput.setText(R.string.per_output);
         perOutput.setOnCheckedChangeListener((b, on) -> {
@@ -772,6 +783,7 @@ public class MainActivity extends Activity {
     private void refresh() {
         battery.setVisibility(needsBatteryExemption() ? View.VISIBLE : View.GONE);
         listenerCard.setVisibility(needsListener() ? View.VISIBLE : View.GONE);
+        powerampCard.setVisibility(needsPowerampHint() ? View.VISIBLE : View.GONE);
         String r = rivalApps();
         rivals.setVisibility(r == null ? View.GONE : View.VISIBLE);
         rivals.setText(r);
@@ -942,12 +954,20 @@ public class MainActivity extends Activity {
     /** YouTube plays but the whole output could not be had: say so above the players' lines. */
     private CharSequence summary() {
         String blocked = Eq.autoBlocked();
-        if (blocked == null) return playersSummary();
+        boolean poweramp = Poweramp.missed(this);
+        if (blocked == null && !poweramp) return playersSummary();
         SpannableStringBuilder sb = new SpannableStringBuilder();
-        bold(sb, "✗ YouTube に ikoras は効いていません");
-        sb.append('\n').append(blocked).append("。YouTube の音は全体（DynamicsProcessing）でしか変えられないため、その間は効かせられません。");
-        // What plays is YouTube, known: "no player told us, force-stop it" would be wrong
-        // (shown so on the AQUOS sense4 plus).
+        if (blocked != null) {
+            bold(sb, "✗ YouTube に ikoras は効いていません");
+            sb.append('\n').append(blocked).append("。YouTube の音は全体（DynamicsProcessing）でしか変えられないため、その間は効かせられません。");
+        }
+        if (poweramp) {
+            if (sb.length() > 0) sb.append('\n');
+            bold(sb, "✗ Poweramp に ikoras は効いていません");
+            sb.append('\n').append(getString(R.string.poweramp_missed));
+        }
+        // What plays is known (YouTube, Poweramp): "no player told us, force-stop it" would be
+        // wrong (shown so on the AQUOS sense4 plus).
         if (!Eq.sessions.isEmpty()) sb.append('\n').append(playersSummary());
         return sb;
     }
@@ -1278,6 +1298,32 @@ public class MainActivity extends Activity {
         box.addView(row);
         listenerCard = box;
         return box;
+    }
+
+    /** Poweramp's way in: say it once, where it is seen, until it has worked or is dismissed. */
+    private View powerampHint() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(0, dp(12), 0, 0);
+        TextView t = new TextView(this);
+        t.setText(R.string.poweramp_card);
+        box.addView(t);
+        Button ok = new Button(this);
+        ok.setText("分かった");
+        ok.setAllCaps(false);
+        ok.setOnClickListener(v -> {
+            ui().edit().putBoolean("powerampDismissed", true).apply();
+            toast("「動作の設定」にも同じ説明があります");
+            refresh();
+        });
+        box.addView(ok, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        powerampCard = box;
+        return box;
+    }
+
+    private boolean needsPowerampHint() {
+        return Eq.isOn(this) && Poweramp.installed(this) && !Poweramp.seen(this)
+                && !ui().getBoolean("powerampDismissed", false);
     }
 
     /** YouTube is installed, ikora would reach it, and only the access is missing. */

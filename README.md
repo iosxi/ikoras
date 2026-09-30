@@ -82,6 +82,26 @@ v5 までの「音量キー」は別の画面で、左上の「＜」でメイ�
 個々の機能の細かい説明は、元のアプリの README にある（ikora-lite: 出力機器ごとの設定・BASS・診断など、
 volzz: 長押しと超長押し・画面が消えているとき・細かい音量の仕組みなど）。
 
+## Poweramp で使う
+
+Poweramp は、再生しているだけでは再生の番号（音声セッション）を知らせない（Xperia で、再生中に何も届かないことを確認）。
+Poweramp（build-1031）のコードを追うと、知らせを送るのは次の 2 つがそろったときだけだった:
+
+1. 設定の「**MusicFX**」（キー `allow_platform_fx`、初期値 OFF）が ON。設定の検索で「FX」と打つと出る
+2. 再生中に **Tone/Vol 画面の「MusicFX」ボタン**を押す。このとき `OPEN_AUDIO_EFFECT_CONTROL_SESSION` を送り、
+   続けて番号付きで「端末のイコライザ画面」（`DISPLAY_AUDIO_EFFECT_CONTROL_PANEL`）を開く
+
+ikoras はその画面として呼ばれるので、開くアプリに ikoras を選べば、YT Music と同じく Poweramp の再生だけに効く。
+Xperia で、この呼び出しで開くと Poweramp の再生に ikoras の DynamicsProcessing（有効・制御権あり）が付き、
+「全体 −12 dB」で「イコライザを使う」を ON/OFF すると、曲の揺れを含めて約 10 dB ずつ上下した（マイクで測定）。
+
+- Poweramp を終了すると番号が変わる。通知へのアクセスが ON なら、Poweramp のメディアセッションが消えたときに
+  古い番号を手放し、次の再生では「✗ Poweramp に効いていません」とボタンからの開き方を出す
+- Poweramp が入っていてまだ一度も付いたことがなければ、イコライザのタブの上に使い方を出す（「分かった」で消える）。
+  「動作の設定」にも同じ説明を置く
+- 実際のボタンを押す操作は、ボタンを自動操作で読めず、同じ呼び出しを adb から送って代わりにした
+- Xperia では、開くアプリの候補は Android の MusicFX、Sony のオーディオ設定、ikoras の 3 つだった
+
 ## 権限
 
 インストール時に自動で付くもの: `MODIFY_AUDIO_SETTINGS`、`VIBRATE`、`FOREGROUND_SERVICE`、
