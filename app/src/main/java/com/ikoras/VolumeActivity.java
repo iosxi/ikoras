@@ -99,6 +99,8 @@ public class VolumeActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_volume);
+        // Back to the main screen: this one is only reached from there.
+        findViewById(R.id.back).setOnClickListener(v -> finish());
         prefs = new Prefs(this);
 
         applySystemBarInsets();

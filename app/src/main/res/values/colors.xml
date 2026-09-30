@@ -3,4 +3,8 @@
     <!-- ikora の青緑と volzz の紺。アイコンで左右に分けて使う。 -->
     <color name="ic_teal">#00897B</color>
     <color name="ic_navy">#1F2A44</color>
+    <!-- 音量キーの画面の文字色。夜間は values-night のものに替わる。 -->
+    <color name="text_accent">#FF3F51B5</color>
+    <color name="text_hint">#FF666666</color>
+    <color name="text_warn">#FFC62828</color>
 </resources>

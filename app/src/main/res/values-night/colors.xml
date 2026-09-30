@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 暗い背景で読める明るさに。 -->
+    <color name="text_accent">#FF9FA8DA</color>
+    <color name="text_hint">#FFAAAAAA</color>
+    <color name="text_warn">#FFEF9A9A</color>
+</resources>

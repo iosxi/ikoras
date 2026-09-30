@@ -31,6 +31,7 @@
 
     <!-- 音量キー（旧 volzz） -->
     <string name="keys_title">音量キー</string>
+    <string name="back_desc">メイン画面に戻る</string>
 
     <string name="service_description">音量キーの長押し・超長押しで曲送りやアプリ起動を、短押しでハードウェア段階より細かい音量調整をします。画面の内容は一切読み取りません。音量キー以外のキーには触れません。</string>
     <string name="service_summary">音量キーの長押しで曲送り、短押しで細かい音量</string>
@@ -40,7 +41,7 @@
     <string name="status_title">状態</string>
     <string name="status_running">動作中</string>
     <string name="status_granted_not_connected">許可済み（サービスの接続待ち）</string>
-    <string name="status_off">停止中 — アクセシビリティ設定で ikoras を有効にしてください</string>
+    <string name="status_off">停止中 — ユーザー補助（アクセシビリティ）の設定で ikoras を ON にしてください</string>
     <string name="status_no_settings">設定画面を開けませんでした</string>
     <string name="open_settings">アクセシビリティ設定を開く</string>
     <string name="open_settings_again">アクセシビリティ設定を開く（確認）</string>
@@ -49,7 +50,7 @@
     <string name="more_close">閉じる ▾</string>
 
     <string name="settings_title">設定</string>
-    <string name="enabled_label">ikoras を有効にする</string>
+    <string name="enabled_label">音量キーを使う</string>
     <string name="enabled_desc">オフにすると音量キーには一切介入しません。</string>
 
     <string name="only_while_playing_label">再生中だけ介入する</string>

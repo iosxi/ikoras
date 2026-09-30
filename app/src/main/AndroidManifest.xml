@@ -70,8 +70,7 @@
         <activity
             android:name=".VolumeActivity"
             android:exported="false"
-            android:label="@string/keys_title"
-            android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar" />
+            android:label="@string/keys_title" />
 
         <!-- Players announce the audio session they start and stop playing. -->
         <receiver

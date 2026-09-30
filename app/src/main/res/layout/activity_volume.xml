@@ -14,12 +14,32 @@
         android:paddingTop="20dp"
         android:paddingBottom="32dp">
 
-        <TextView
+        <!-- 見出し。左の「＜」でメイン画面に戻る。 -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/app_name"
-            android:textSize="32sp"
-            android:textStyle="bold" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/back"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginStart="-12dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/back_desc"
+                android:gravity="center"
+                android:text="＜"
+                android:textSize="26sp" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/keys_title"
+                android:textSize="32sp"
+                android:textStyle="bold" />
+        </LinearLayout>
 
         <TextView
             android:layout_width="match_parent"
@@ -88,7 +108,7 @@
             android:id="@+id/vibrate_warning"
             style="@style/Hint"
             android:text="@string/vibrate_off_warning"
-            android:textColor="#FFC62828"
+            android:textColor="@color/text_warn"
             android:visibility="gone" />
 
         <TextView
