@@ -29,6 +29,8 @@ import android.text.style.StyleSpan;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
+import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -568,12 +570,27 @@ public class MainActivity extends Activity {
         LinearLayout box = new LinearLayout(this);
         box.setPadding(dp(20), dp(8), dp(20), 0);
         box.addView(name, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        new AlertDialog.Builder(this)
+        AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("今の値をプリセットとして保存")
                 .setView(box)
                 .setPositiveButton("保存", (d, w) -> save(name.getText().toString().trim()))
                 .setNegativeButton("キャンセル", null)
-                .show();
+                .create();
+        // Keyboard up with the name all selected: typing replaces it at once. Without this the
+        // keyboard stayed down, and tapping the field to bring it up dropped the selection.
+        dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+        // The keyboard's Done saves, as the button does; so does Enter on a hardware keyboard
+        // (it arrives as IME_NULL with the key event, not as Done).
+        name.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        name.setOnEditorActionListener((v, action, ev) -> {
+            boolean enter = ev != null && ev.getKeyCode() == android.view.KeyEvent.KEYCODE_ENTER
+                    && ev.getAction() == android.view.KeyEvent.ACTION_DOWN;
+            if (action != EditorInfo.IME_ACTION_DONE && !enter) return false;
+            dialog.dismiss();
+            save(name.getText().toString().trim());
+            return true;
+        });
+        dialog.show();
         name.requestFocus();
     }
 
