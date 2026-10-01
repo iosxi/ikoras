@@ -13,7 +13,7 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Runtime permission, asked only when "常駐して待つ" or whole-output mode is turned on. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Runtime permission, asked only when 機器プリセット lists the paired Bluetooth devices. -->
+    <!-- Runtime permission, asked only when the 機器プリセット tab lists the paired Bluetooth devices. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission
         android:name="android.permission.BLUETOOTH"
@@ -61,10 +61,6 @@
                 <category android:name="android.intent.category.CATEGORY_CONTENT_MUSIC" />
             </intent-filter>
         </activity>
-
-        <activity
-            android:name=".DevicesActivity"
-            android:exported="false" />
 
         <!-- Players announce the audio session they start and stop playing. -->
         <receiver

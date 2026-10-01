@@ -27,8 +27,9 @@
             android:text="@string/intro"
             android:textSize="14sp" />
 
-        <!-- 状態 -->
+        <!-- 状態（ユーザー補助で ON にするまでの案内。動作中になったら見出しごと隠す） -->
         <TextView
+            android:id="@+id/status_title"
             style="@style/SectionTitle"
             android:text="@string/status_title" />
 

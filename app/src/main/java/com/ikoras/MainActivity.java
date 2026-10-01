@@ -51,7 +51,6 @@ public class MainActivity extends Activity {
     private Switch power;
     private Switch global;
     private Switch resident;
-    private Switch perOutput;
     /** Silent players (YouTube), found with DUMP; and what it needs when DUMP is missing. */
     private Switch watch;
     private TextView watchHint;
@@ -65,7 +64,6 @@ public class MainActivity extends Activity {
     private TextView rivals;
     /** Which output's settings the faders and BASS show. */
     private TextView outputView;
-    private String shownOutput;
     private TextView status;
     private TextView chainView;
     private TextView diagView;
@@ -89,6 +87,8 @@ public class MainActivity extends Activity {
     private boolean syncing;
     /** The 音量キー and 音量段階 tabs (was volzz's own screen). */
     private KeysPage keysTabs;
+    /** The 機器プリセット tab (was a screen of its own). */
+    private DevicesPage devicesTab;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private boolean resumed;
@@ -270,14 +270,10 @@ public class MainActivity extends Activity {
         col.addView(powerampHint());
 
 
+        // Set ahead in the 機器プリセット tab; which of them is in the faders now.
         outputView = new TextView(this);
         outputView.setPadding(0, dp(12), 0, 0);
         col.addView(outputView);
-        Button devices = new Button(this);
-        devices.setText("機器プリセット…");
-        devices.setAllCaps(false);
-        devices.setOnClickListener(v -> startActivity(new Intent(this, DevicesActivity.class)));
-        col.addView(devices);
 
         // Wrapped onto as many rows as needed: all of them in sight, none behind a scroll.
         presets = new Flow(this);
@@ -386,15 +382,6 @@ public class MainActivity extends Activity {
         pa.setPadding(0, dp(12), 0, 0);
         modes.addView(pa);
         modes.addView(hint(R.string.poweramp_hint));
-        perOutput = new Switch(this);
-        perOutput.setText(R.string.per_output);
-        perOutput.setOnCheckedChangeListener((b, on) -> {
-            if (syncing) return;
-            Outputs.setEnabled(this, on);
-            refresh();
-        });
-        modes.addView(perOutput);
-        modes.addView(hint(R.string.per_output_hint));
 
         section(col, "使うイコライザ", "picker").addView(picker());
 
@@ -433,25 +420,21 @@ public class MainActivity extends Activity {
         send.setOnClickListener(v -> sendReport());
         diag.addView(send);
 
-        // Three tabs: the equalizer (was ikora-lite), the volume keys (was volzz) and the
-        // volume steps (was voom, then part of volzz). One screen, the tab bar on top.
+        // Four tabs: the equalizer (was ikora-lite), its settings per output and app, the volume
+        // keys (was volzz) and the volume steps (was voom, then part of volzz). One screen, the
+        // tab bar on top: the first line, with no title above it.
         ScrollView eqPage = new ScrollView(this);
         eqPage.addView(col);
+        devicesTab = new DevicesPage(this);
         ScrollView keysPage = new ScrollView(this);
         keysPage.addView(getLayoutInflater().inflate(R.layout.tab_keys, keysPage, false));
         ScrollView stepsPage = new ScrollView(this);
         stepsPage.addView(getLayoutInflater().inflate(R.layout.tab_steps, stepsPage, false));
-        pages = new View[]{eqPage, keysPage, stepsPage};
+        pages = new View[]{eqPage, devicesTab.view, keysPage, stepsPage};
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        TextView title = new TextView(this);
-        title.setText(R.string.app_name);
-        title.setTextSize(22);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setPadding(pad, dp(12), pad, dp(4));
-        root.addView(title);
-        root.addView(tabBar(new int[]{R.string.tab_eq, R.string.tab_keys, R.string.tab_steps}));
+        root.addView(tabBar(new int[]{R.string.tab_eq, R.string.tab_devices, R.string.tab_keys, R.string.tab_steps}));
         // Concerns every tab: the apps ikoras was made from fight over effects and keys.
         rivals = new TextView(this);
         rivals.setTextColor(0xFFD32F2F);
@@ -460,7 +443,7 @@ public class MainActivity extends Activity {
         FrameLayout content = new FrameLayout(this);
         for (View page : pages) content.addView(page);
         root.addView(content, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
-        showTab(ui().getInt("tab", 0));
+        showTab(savedTab());
 
         // targetSdk 35+ draws edge to edge: keep content clear of the system bars.
         root.setOnApplyWindowInsetsListener((v, in) -> {
@@ -473,12 +456,12 @@ public class MainActivity extends Activity {
 
     // --- Tabs -------------------------------------------------------------------------------
 
-    /** The three pages, in tab order; one shows at a time. */
+    /** The four pages, in tab order; one shows at a time. */
     private View[] pages;
     private TextView[] tabLabels;
     private View[] tabLines;
 
-    /** Equal-width tabs; the chosen one bold, in the accent colour, underlined. */
+    /** Tabs as wide as their names; the chosen one bold, in the accent colour, underlined. */
     private View tabBar(int[] names) {
         LinearLayout bar = new LinearLayout(this);
         tabLabels = new TextView[names.length];
@@ -489,10 +472,18 @@ public class MainActivity extends Activity {
             tab.setBackgroundResource(ripple());
             TextView t = new TextView(this);
             t.setText(names[i]);
-            t.setTextSize(15);
+            // One line each, all the same size: a tab is as wide as its name, and what is left
+            // is shared out. Equal widths made 「機器プリセット」 wrap, or shrink when sized to fit.
+            t.setTextSize(14);
+            t.setMaxLines(1);
             t.setGravity(Gravity.CENTER);
-            t.setPadding(0, dp(12), 0, dp(10));
-            tab.addView(t);
+            t.setPadding(dp(4), dp(12), dp(4), dp(10));
+            // As wide as the name: by default a vertical layout's child fills it, and every tab
+            // then asked for the whole bar and got a quarter of it.
+            LinearLayout.LayoutParams name = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            name.gravity = Gravity.CENTER_HORIZONTAL;
+            tab.addView(t, name);
             View line = new View(this);
             line.setBackgroundColor(getColor(R.color.text_accent));
             tab.addView(line, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3)));
@@ -500,14 +491,36 @@ public class MainActivity extends Activity {
             tab.setOnClickListener(v -> showTab(index));
             tabLabels[i] = t;
             tabLines[i] = line;
-            bar.addView(tab, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+            bar.addView(tab, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         }
+        bar.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            if (r - l != or - ol) bar.post(() -> fitTabs(bar.getWidth()));
+        });
         return bar;
     }
 
+    /**
+     * Large text (the XQ-FS44 is set to 1.5×) does not fit four names on one line: make them
+     * all smaller alike, just enough. Measured in bold, as the chosen tab is drawn.
+     */
+    private void fitTabs(int width) {
+        android.graphics.Paint p = new android.graphics.Paint(tabLabels[0].getPaint());
+        p.setTypeface(Typeface.DEFAULT_BOLD);
+        p.setTextSize(android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_SP,
+                14, getResources().getDisplayMetrics()));
+        float need = 0;
+        for (TextView t : tabLabels) {
+            need += p.measureText(t.getText().toString()) + t.getPaddingLeft() + t.getPaddingRight();
+        }
+        float scale = Math.min(1f, width / need);
+        for (TextView t : tabLabels) t.setTextSize(14 * scale);
+    }
+
+    private static final int TAB_DEVICES = 1;
+
     private void showTab(int index) {
         if (index < 0 || index >= pages.length) index = 0;
-        ui().edit().putInt("tab", index).apply();
+        ui().edit().putInt("page", index).apply();
         for (int i = 0; i < pages.length; i++) {
             boolean on = i == index;
             pages[i].setVisibility(on ? View.VISIBLE : View.GONE);
@@ -515,6 +528,21 @@ public class MainActivity extends Activity {
             tabLabels[i].setTextColor(getColor(on ? R.color.text_accent : R.color.text_hint));
             tabLines[i].setVisibility(on ? View.VISIBLE : View.INVISIBLE);
         }
+        // A preset set in one tab shows in the other: draw the one coming into view afresh.
+        if (resumed) refresh();
+    }
+
+    /** The tab open last time. Up to v7 "tab" counted three tabs, without 機器プリセット. */
+    private int savedTab() {
+        SharedPreferences ui = ui();
+        if (ui.contains("page")) return ui.getInt("page", 0);
+        int old = ui.getInt("tab", 0);
+        return old == 0 ? 0 : old + 1;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
+        if (code == DevicesPage.ASK_PAIRED) devicesTab.fill();
     }
 
     private int ripple() {
@@ -743,7 +771,6 @@ public class MainActivity extends Activity {
         power.setChecked(on);
         global.setChecked(Eq.isGlobal(this));
         resident.setChecked(Eq.isResident(this));
-        perOutput.setChecked(Outputs.isEnabled(this));
         watch.setChecked(Watch.isEnabled(this));
         // DUMP (a developer's device) finds YouTube's own session; otherwise the whole output
         // while it plays, which needs 通知へのアクセス.
@@ -790,6 +817,7 @@ public class MainActivity extends Activity {
 
         syncControls();
         showOutput();
+        if (pages[TAB_DEVICES].getVisibility() == View.VISIBLE) devicesTab.fill();
         status.setText(summary());
         showPlayerInfo(!Eq.usesGlobal(this) && Eq.isOn(this) && Eq.sessions.isEmpty() && Diag.mediaPlaying(this));
         chainView.setText(chainText());
@@ -800,27 +828,32 @@ public class MainActivity extends Activity {
         diagView.setText(recentEvents());
     }
 
-    /** Which output the settings are for; on a change of output, show that output's values. */
+    /**
+     * Which output (and app) the settings are for; when that changes, or a preset was set for
+     * it in 機器プリセット, show its values.
+     */
     private void showOutput() {
-        String key = Outputs.isEnabled(this) ? Outputs.activeKey(this) : null;
+        String key = Outputs.isEnabled(this) ? Outputs.activeEntry(this) : null;
         outputView.setVisibility(key == null ? View.GONE : View.VISIBLE);
         if (key != null) {
             SpannableStringBuilder sb = new SpannableStringBuilder("出力: ");
             bold(sb, Outputs.activeLabel(this));
-            sb.append(" の設定（出力が変わると自動で切り替わります）");
+            String app = Outputs.appOf(key);
+            if (app != null) {
+                sb.append(" ＋ ");
+                bold(sb, Outputs.appLabel(this, app));
+                sb.append(" の設定");
+            } else {
+                sb.append(" の設定（すべてのアプリ）");
+            }
+            sb.append("\n出力機器や再生するアプリが変わると、「機器プリセット」の設定に自動で切り替わります");
             outputView.setText(sb);
         }
-        // Also on coming back from 機器プリセット: the current output's values may have been set there.
-        if (key != null && shownOutput != null && !java.util.Arrays.equals(bands.steps(), currentSteps())) {
+        if (!java.util.Arrays.equals(bands.steps(), currentSteps())) {
             bands.setSteps(currentSteps());
             markPresets();
         }
-        if (key != null && !key.equals(shownOutput) && shownOutput != null) {
-            bands.setSteps(currentSteps());
-            markPresets();
-            markBass();
-        }
-        shownOutput = key;
+        markBass();
     }
 
     // --- Diagnostics without DUMP ----------------------------------------------------------
@@ -886,7 +919,9 @@ public class MainActivity extends Activity {
                 .append(Watch.active(this) ? "（DUMP で探す）" : "").append('\n');
         sb.append("通知へのアクセス: ").append(PlayingListener.allowed(this) ? "あり" : "なし").append('\n');
         sb.append("出力機器ごとに覚える: ").append(Outputs.isEnabled(this)
-                ? "ON（今: " + Outputs.activeLabel(this) + "）" : "OFF").append('\n');
+                ? "ON（今: " + Outputs.entryLabel(this, Outputs.activeEntry(this)) + "）" : "OFF").append('\n');
+        String app = Outputs.app(this);
+        sb.append("最後に再生を始めたアプリ: ").append(app == null ? "（まだ分からない）" : app).append('\n');
         sb.append("常駐サービス: ").append(serviceRunning() ? "動いている" : "止まっている").append('\n');
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             sb.append("通知の許可: ").append(checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)

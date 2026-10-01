@@ -21,6 +21,9 @@ import java.util.List;
  * on one pair of headphones (reported on the Sony WH-1000XM5 over Bluetooth), so each output
  * keeps its own bands and BASS: changing them saves for the current output, and a change of
  * output loads what that output had. Bluetooth devices are told apart by name.
+ * An output may also keep settings for one app (機器プリセット): YouTube's voices and YT Music's
+ * songs want different curves on the same headphones. They apply while that app is the one
+ * last seen playing; every other app gets the output's own.
  */
 final class Outputs {
 
@@ -161,19 +164,23 @@ final class Outputs {
     }
 
     /**
-     * If music now goes somewhere else, save the values under the output they belonged to and
-     * load the new output's. An output seen for the first time starts from the current values.
+     * If music now goes somewhere else, or another app plays, load the settings for that output
+     * and app: the app's own for this output if set (機器プリセット), else the output's. An output
+     * seen for the first time starts from the current values.
      */
     static void check(Context c) {
         if (!isEnabled(c)) return;
         Out now = current(c);
-        String was = activeKey(c);
-        if (now.key.equals(was)) return;
-        Eq.prefs(c).edit().putString("output", now.key).putString("outputLabel", now.label).apply();
+        String app = app(c);
+        String want = app != null && prefs(c).contains(entryKey(now.key, app)) ? entryKey(now.key, app) : now.key;
+        String was = activeEntry(c);
+        if (now.key.equals(activeKey(c)) && want.equals(was)) return;
+        Eq.prefs(c).edit().putString("output", now.key).putString("outputLabel", now.label)
+                .putString("entry", want).apply();
         int[] steps = new int[Eq.N];
         int[] bass = new int[1];
-        if (load(c, now.key, steps, bass)) {
-            Diag.note(c, "出力が「" + now.label + "」に: この機器の設定に切り替えた（BASS " + bass[0] + "）");
+        if (load(c, want, steps, bass)) {
+            Diag.note(c, "「" + entryLabel(c, want) + "」の設定に切り替えた（BASS " + bass[0] + "）");
             Eq.setAll(c, steps, bass[0]);
         } else {
             Diag.note(c, "出力が「" + now.label + "」に: 初めての機器なので今の設定を引き継ぐ");
@@ -181,20 +188,102 @@ final class Outputs {
         }
     }
 
-    /** Save the current values for the current output. Called on every change of them. */
+    /** Save the current values where they were loaded from. Called on every change of them. */
     static void remember(Context c) {
-        String key = activeKey(c);
+        String key = activeEntry(c);
         if (key == null || !isEnabled(c)) return;
         int[] steps = new int[Eq.N];
         for (int i = 0; i < Eq.N; i++) steps[i] = Eq.step(c, i);
         save(c, key, steps, Eq.bass(c));
     }
 
-    // --- Set up ahead of time (the 機器プリセット screen) --------------------------------------
+    /** The stored settings in the faders now: the output's, or the output's for one app. */
+    static String activeEntry(Context c) {
+        // Before v8 only the output was kept: its settings are the ones in use.
+        return Eq.prefs(c).getString("entry", activeKey(c));
+    }
 
-    /** Every output that has settings saved, in no particular order. */
+    // --- Which app plays ----------------------------------------------------------------------
+
+    /** Between an output's key and an app's package, in the key of the app's own settings. */
+    private static final String APP = "|app:";
+
+    /**
+     * The app last seen starting to play, kept while it pauses: the faders should not jump to
+     * other values on every pause. Null before any app was seen.
+     */
+    static String app(Context c) {
+        return Eq.prefs(c).getString("app", null);
+    }
+
+    /**
+     * An app started playing: a player told its session, or its media session plays (seen
+     * with 通知へのアクセス). Its settings for this output apply, if set.
+     */
+    static void setApp(Context c, String pkg) {
+        if (pkg == null || pkg.isEmpty() || pkg.equals(c.getPackageName())) return;
+        java.util.Set<String> seen = new java.util.HashSet<>(prefs(c).getStringSet(PLAYERS, new java.util.HashSet<>()));
+        if (seen.add(pkg)) prefs(c).edit().putStringSet(PLAYERS, seen).apply();
+        if (pkg.equals(app(c))) return;
+        Eq.prefs(c).edit().putString("app", pkg).apply();
+        Diag.note(c, "再生中のアプリ: " + appLabel(c, pkg));
+        check(c);
+    }
+
+    /** Every app seen playing, for the picker of 機器プリセット. Not an output: no settings. */
+    private static final String PLAYERS = "#players";
+
+    static java.util.Set<String> players(Context c) {
+        return prefs(c).getStringSet(PLAYERS, java.util.Collections.emptySet());
+    }
+
+    static String appLabel(Context c, String pkg) {
+        try {
+            android.content.pm.PackageManager pm = c.getPackageManager();
+            return pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString();
+        } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+            return pkg;
+        }
+    }
+
+    // --- Set up ahead of time (the 機器プリセット tab) -----------------------------------------
+
+    static String entryKey(String output, String pkg) {
+        return output + APP + pkg;
+    }
+
+    /** The output part of a stored key. */
+    static String outputOf(String key) {
+        int at = key.lastIndexOf(APP);
+        return at < 0 ? key : key.substring(0, at);
+    }
+
+    /** The app part of a stored key, or null for an output's own settings. */
+    static String appOf(String key) {
+        int at = key.lastIndexOf(APP);
+        return at < 0 ? null : key.substring(at + APP.length());
+    }
+
+    /** Every output that has settings saved (its own, or for an app), in no particular order. */
     static java.util.Set<String> savedKeys(Context c) {
-        return prefs(c).getAll().keySet();
+        java.util.Set<String> out = new java.util.HashSet<>();
+        for (String k : prefs(c).getAll().keySet()) if (!k.equals(PLAYERS)) out.add(outputOf(k));
+        return out;
+    }
+
+    /** The apps that have settings of their own for the output. */
+    static java.util.List<String> appsOf(Context c, String output) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        for (String k : prefs(c).getAll().keySet()) {
+            if (!k.equals(PLAYERS) && appOf(k) != null && outputOf(k).equals(output)) out.add(appOf(k));
+        }
+        return out;
+    }
+
+    /** "WH-1000XM5", or "WH-1000XM5 ＋ YouTube". */
+    static String entryLabel(Context c, String key) {
+        String app = appOf(key);
+        return labelOf(outputOf(key)) + (app == null ? "" : " ＋ " + appLabel(c, app));
     }
 
     /** A Bluetooth device's key, as it will be seen once it plays: by name. */
@@ -219,13 +308,23 @@ final class Outputs {
      */
     static void assign(Context c, String key, int[] steps, int bass) {
         save(c, key, steps, bass);
-        Diag.note(c, "機器プリセット: 「" + labelOf(key) + "」に割り当て（BASS " + bass + "）");
-        if (isEnabled(c) && key.equals(activeKey(c))) Eq.setAll(c, steps, bass);
+        Diag.note(c, "機器プリセット: 「" + entryLabel(c, key) + "」に割り当て（BASS " + bass + "）");
+        if (!isEnabled(c)) return;
+        if (key.equals(activeEntry(c))) {
+            Eq.setAll(c, steps, bass);
+        } else if (appOf(key) != null) {
+            // Set for the output and app playing now: it takes over from the output's own.
+            check(c);
+        }
     }
 
-    /** Forget an output's settings: next time it starts from whatever is current then. */
+    /**
+     * Forget an output's settings: next time it starts from whatever is current then. An app's
+     * own settings: the output's apply to it again, at once if it plays now.
+     */
     static void forget(Context c, String key) {
         prefs(c).edit().remove(key).apply();
+        if (appOf(key) != null && key.equals(activeEntry(c))) check(c);
     }
 
     private static void save(Context c, String key, int[] steps, int bass) {

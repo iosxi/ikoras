@@ -41,6 +41,8 @@ final class KeysPage {
     private Prefs prefs;
 
     private TextView status;
+    /** 「状態」の見出し。設定が済んだら中身と一緒に隠す。 */
+    private View statusTitle;
     private TextView diag;
     private TextView vibrateWarning;
     private Button openSettings;
@@ -107,6 +109,7 @@ final class KeysPage {
         prefs = new Prefs(a);
 
         status = a.findViewById(R.id.status);
+        statusTitle = a.findViewById(R.id.status_title);
         diag = a.findViewById(R.id.diag);
         openSettings = a.findViewById(R.id.open_settings);
         enabled = a.findViewById(R.id.enabled);
@@ -548,9 +551,16 @@ final class KeysPage {
             status.setText(R.string.status_off);
         }
         openSettings.setText(granted ? R.string.open_settings_again : R.string.open_settings);
+        // 案内とボタンは設定が済むまでのもの。動作中になったら「状態」の見出しごと隠す。
+        final int setUp = connected ? View.GONE : View.VISIBLE;
+        statusTitle.setVisibility(setUp);
+        status.setVisibility(setUp);
+        openSettings.setVisibility(setUp);
         // 細かい音量は音量キーの短押しで動くので、そちらが止まっていれば「音量段階」タブにも出す。
-        stepsService.setText(!connected ? R.string.steps_service_off
-                : !prefs.enabled() ? R.string.steps_keys_off : R.string.steps_service_ok);
+        // 動いているなら言うことはない。
+        final boolean keysOk = connected && prefs.enabled();
+        stepsService.setText(!connected ? R.string.steps_service_off : R.string.steps_keys_off);
+        stepsService.setVisibility(keysOk ? View.GONE : View.VISIBLE);
         stepsOpenSettings.setVisibility(connected ? View.GONE : View.VISIBLE);
         stepsOpenSettings.setText(granted ? R.string.open_settings_again : R.string.open_settings);
 

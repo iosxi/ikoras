@@ -79,9 +79,9 @@ public class PlayingListener extends NotificationListenerService {
             boolean poweramp = false;
             for (MediaController c : sessions) if (Poweramp.PKG.equals(c.getPackageName())) poweramp = true;
             if (!poweramp) Eq.closePackage(this, Poweramp.PKG);
+            // Every app: which one plays picks its settings in 機器プリセット. YouTube (no session
+            // told) and Poweramp (told only by its MusicFX button) also for the effect itself.
             for (MediaController c : sessions) {
-                // YouTube (no session told), and Poweramp (told only by its MusicFX button).
-                if (!Watch.isSilent(c.getPackageName()) && !Poweramp.PKG.equals(c.getPackageName())) continue;
                 c.registerCallback(onState, main);
                 watched.add(c);
             }
@@ -91,12 +91,19 @@ public class PlayingListener extends NotificationListenerService {
 
     private void judge() {
         boolean playing = false, poweramp = false;
+        MediaController latest = null;
         for (MediaController c : watched) {
             PlaybackState s = c.getPlaybackState();
             if (s == null || !plays(s.getState())) continue;
+            // Two playing at once: the one that started (or moved) last.
+            if (latest == null || s.getLastPositionUpdateTime() > latest.getPlaybackState().getLastPositionUpdateTime()) {
+                latest = c;
+            }
             if (Poweramp.PKG.equals(c.getPackageName())) poweramp = true;
-            else playing = true;
+            else if (Watch.isSilent(c.getPackageName())) playing = true;
         }
+        // First: an effect made for YouTube below then starts with YouTube's settings.
+        if (latest != null) Outputs.setApp(this, latest.getPackageName());
         Poweramp.setPlaying(this, poweramp);
         Eq.setSilentPlaying(this, playing);
     }

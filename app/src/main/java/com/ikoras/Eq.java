@@ -313,6 +313,8 @@ final class Eq {
         sessions.put(session, pkg);
         if (Poweramp.PKG.equals(pkg)) Poweramp.markSeen(c);
         save(c);
+        // Before attaching: the new effect starts with this app's settings, if it has its own.
+        Outputs.setApp(c, pkg);
         attachMissing(c);
         changed();
     }
